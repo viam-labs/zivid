@@ -1,0 +1,16 @@
+{
+    "module_id": "viam:camera:zivid",
+    "visibility": "private",
+    "description": "Viam module for Zivid 3D cameras",
+    "models": [
+        {
+            "api": "rdk:component:camera",
+            "model": "viam:camera:zivid"
+        },
+        {
+            "api": "rdk:service:discovery",
+            "model": "viam:zivid:discovery"
+        }
+    ],
+    "entrypoint": "viam-camera-zivid"
+}

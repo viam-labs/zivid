@@ -1,0 +1,5 @@
+CMakeUserPresets.json
+bin/
+build-conan/
+module.tar.gz
+venv/
