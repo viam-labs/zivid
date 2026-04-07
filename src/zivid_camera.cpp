@@ -9,6 +9,7 @@
 #include <stb_image_write.h>
 
 #include <Zivid/CameraInfo.h>
+#include <Zivid/Experimental/SettingsInfo.h>
 #include <Zivid/NetworkConfiguration.h>
 #include <Zivid/CameraIntrinsics.h>
 #include <Zivid/Experimental/Calibration.h>
@@ -433,6 +434,39 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
     }
 
     const auto& cmd = it->second.get_unchecked<std::string>();
+
+    if (cmd == "get_acquisition_ranges") {
+        const auto info = camera_.info();
+        namespace SI = Zivid::Experimental::SettingsInfo;
+
+        auto aperture  = SI::validRange<Zivid::Settings::Acquisition::Aperture>(info);
+        auto brightness = SI::validRange<Zivid::Settings::Acquisition::Brightness>(info);
+        auto exposure   = SI::validRange<Zivid::Settings::Acquisition::ExposureTime>(info);
+        auto gain       = SI::validRange<Zivid::Settings::Acquisition::Gain>(info);
+
+        viam::sdk::ProtoStruct aperture_struct;
+        aperture_struct["min"] = aperture.min();
+        aperture_struct["max"] = aperture.max();
+
+        viam::sdk::ProtoStruct brightness_struct;
+        brightness_struct["min"] = brightness.min();
+        brightness_struct["max"] = brightness.max();
+
+        viam::sdk::ProtoStruct exposure_struct;
+        exposure_struct["min"] = static_cast<double>(exposure.min().count());
+        exposure_struct["max"] = static_cast<double>(exposure.max().count());
+
+        viam::sdk::ProtoStruct gain_struct;
+        gain_struct["min"] = gain.min();
+        gain_struct["max"] = gain.max();
+
+        viam::sdk::ProtoStruct result;
+        result["aperture"]        = viam::sdk::ProtoValue{std::move(aperture_struct)};
+        result["brightness"]      = viam::sdk::ProtoValue{std::move(brightness_struct)};
+        result["exposure_time_us"] = viam::sdk::ProtoValue{std::move(exposure_struct)};
+        result["gain"]            = viam::sdk::ProtoValue{std::move(gain_struct)};
+        return result;
+    }
 
     if (cmd == "get_network_configuration") {
         const auto net = camera_.networkConfiguration();

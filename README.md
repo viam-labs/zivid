@@ -59,10 +59,10 @@ Each entry in `acquisitions` supports:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `aperture` | float | No | Lens aperture as an f-number. Valid range: **1.4 – 32.0**. |
-| `brightness` | float | No | Projector brightness. Valid range: **0.0 – 3.0**. |
-| `exposure_time_us` | float | No | Exposure time in microseconds. Valid range: **200 – 100000**. |
-| `gain` | float | No | Analog sensor gain. Valid range: **1.0 – 16.0**. |
+| `aperture` | float | No | Lens aperture as an f-number. Valid range depends on camera model. |
+| `brightness` | float | No | Projector brightness. Valid range depends on camera model. |
+| `exposure_time_us` | float | No | Exposure time in microseconds. Valid range depends on camera model. |
+| `gain` | float | No | Analog sensor gain. Valid range depends on camera model. |
 
 #### Region of Interest
 
@@ -144,6 +144,27 @@ Response:
 ```
 
 `inaccessible_reason` is included only when the camera status is `inaccessible`.
+
+##### `get_acquisition_ranges`
+
+Returns the valid ranges for acquisition parameters for the connected camera model.
+
+```python
+result = camera.do_command({"command": "get_acquisition_ranges"})
+```
+
+Response:
+
+```json
+{
+  "aperture":         {"min": 2.37,  "max": 32.0},
+  "brightness":       {"min": 1.0,   "max": 2.5},
+  "exposure_time_us": {"min": 900,   "max": 100000},
+  "gain":             {"min": 1.0,   "max": 16.0}
+}
+```
+
+Ranges vary by camera model (example above is for a Zivid 2+ MR60). Use this command to discover the valid values for your camera before configuring `acquisitions`.
 
 ##### `get_network_configuration`
 
