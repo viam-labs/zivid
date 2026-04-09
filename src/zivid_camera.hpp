@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include <Zivid/Application.h>
 #include <Zivid/Camera.h>
@@ -76,7 +77,21 @@ class ZividCamera : public viam::sdk::Camera {
 
     viam::sdk::ProtoStruct get_status() override;
 
+    // Returns a fresh frame captured with the current settings, bypassing the cache.
+    // Used by ZividHandEyeCalibration.
+    Zivid::Frame capture_for_calibration();
+
+    // Returns the camera serial number string.
+    std::string serial_number() const;
+
+    // Registry of live ZividCamera instances keyed by resource name.
+    // Used by ZividHandEyeCalibration to obtain the real object, since Viam passes
+    // gRPC proxy objects as dependencies rather than the actual C++ instances.
+    static ZividCamera* find(const std::string& name);
+
    private:
+    static std::mutex registry_mutex_;
+    static std::unordered_map<std::string, ZividCamera*> registry_;
     // Returns the cached frame if it is younger than kFrameCacheTtl, otherwise
     // triggers a new capture and updates the cache.
     Zivid::Frame get_or_capture();

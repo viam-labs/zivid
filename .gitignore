@@ -3,3 +3,5 @@ bin/
 build-conan/
 module.tar.gz
 venv/
+.env
+.venv/

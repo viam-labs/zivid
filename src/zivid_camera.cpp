@@ -22,6 +22,17 @@
 
 namespace viam_zivid {
 
+// Static registry definitions.
+std::mutex ZividCamera::registry_mutex_;
+std::unordered_map<std::string, ZividCamera*> ZividCamera::registry_;
+
+// static
+ZividCamera* ZividCamera::find(const std::string& name) {
+    std::lock_guard<std::mutex> lk(registry_mutex_);
+    auto it = registry_.find(name);
+    return (it != registry_.end()) ? it->second : nullptr;
+}
+
 namespace {
 
 constexpr const char* kColorSourceName = "color";
@@ -283,9 +294,16 @@ ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app,
     } else {
         camera_ = app_->connectCamera();
     }
+
+    std::lock_guard<std::mutex> lk(registry_mutex_);
+    registry_[cfg.name()] = this;
 }
 
 ZividCamera::~ZividCamera() {
+    {
+        std::lock_guard<std::mutex> lk(registry_mutex_);
+        registry_.erase(name());
+    }
     try {
         camera_.disconnect();
     } catch (...) {
@@ -504,6 +522,29 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
     }
 
     return {};
+}
+
+Zivid::Frame ZividCamera::capture_for_calibration() {
+    std::unique_lock<std::mutex> lock(capture_mutex_);
+    capture_cv_.wait(lock, [this] { return !capturing_; });
+
+    capturing_ = true;
+    lock.unlock();
+
+    VIAM_RESOURCE_LOG(info) << "calibration capture begin";
+    Zivid::Frame frame = camera_.capture2D3D(settings_);
+    VIAM_RESOURCE_LOG(info) << "calibration capture end";
+
+    lock.lock();
+    capturing_ = false;
+    lock.unlock();
+    capture_cv_.notify_all();
+
+    return frame;
+}
+
+std::string ZividCamera::serial_number() const {
+    return camera_.info().serialNumber().value();
 }
 
 viam::sdk::ProtoStruct ZividCamera::get_status() {
