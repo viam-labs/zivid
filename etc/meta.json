@@ -10,6 +10,14 @@
         {
             "api": "rdk:service:discovery",
             "model": "viam:zivid:discovery"
+        },
+        {
+            "api": "rdk:service:generic",
+            "model": "viam:zivid:handeye-calibration"
+        },
+        {
+            "api": "rdk:service:generic",
+            "model": "viam:zivid:stitcher"
         }
     ],
     "entrypoint": "viam-camera-zivid"

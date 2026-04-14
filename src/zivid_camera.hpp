@@ -46,7 +46,8 @@ struct DepthRoiConfig {
 
 struct Config {
     std::optional<std::string> serial_number;
-    std::vector<AcquisitionConfig> acquisitions;
+    std::vector<AcquisitionConfig> acquisitions;     // 3D capture
+    std::vector<AcquisitionConfig> acquisitions_2d;  // 2D color capture
     std::optional<std::string> engine;
     std::optional<BoxRoiConfig> box_roi;
     std::optional<DepthRoiConfig> depth_roi;

@@ -29,6 +29,7 @@ add_executable(${PROJECT_NAME}
     src/zivid_camera.cpp
     src/zivid_discovery.cpp
     src/zivid_handeye.cpp
+    src/zivid_stitcher.cpp
 )
 
 target_include_directories(${PROJECT_NAME}
