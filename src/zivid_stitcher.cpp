@@ -2,7 +2,9 @@
 
 #include <array>
 #include <chrono>
+#include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -24,6 +26,18 @@ namespace {
 // ---------------------------------------------------------------------------
 // Hand-eye JSON loading
 // ---------------------------------------------------------------------------
+
+// Scale matrix that converts millimetres to metres (applied before export).
+Zivid::Matrix4x4 mm_to_m_matrix() {
+    // clang-format off
+    const std::array<float, 16> elems{
+        0.001f, 0.f,    0.f,    0.f,
+        0.f,    0.001f, 0.f,    0.f,
+        0.f,    0.f,    0.001f, 0.f,
+        0.f,    0.f,    0.f,    1.f};
+    // clang-format on
+    return Zivid::Matrix4x4{elems.begin(), elems.end()};
+}
 
 // Multiply two 4×4 Zivid matrices (Zivid::Matrix4x4 has no operator*).
 Zivid::Matrix4x4 mat4_multiply(const Zivid::Matrix4x4& A, const Zivid::Matrix4x4& B) {
@@ -213,6 +227,13 @@ viam::sdk::ProtoStruct ZividStitcher::cmd_run_scan() {
             "Add a 'scan_poses' list to the service attributes.");
     }
 
+    // Create a timestamped output directory for this scan session.
+    const std::string ts = timestamp_for_filename();
+    const std::filesystem::path out_dir =
+        std::filesystem::path(save_dir_) / ("zivid_scan_" + ts);
+    std::filesystem::create_directories(out_dir);
+    VIAM_RESOURCE_LOG(info) << "run_scan: output directory " << out_dir.string();
+
     VIAM_RESOURCE_LOG(info) << "run_scan: starting scan with " << scan_poses_.size()
                              << " poses, settle_delay=" << settle_delay_s_ << "s";
 
@@ -264,15 +285,13 @@ viam::sdk::ProtoStruct ZividStitcher::cmd_run_scan() {
             try {
                 auto cloud = capture_transformed_cloud();
 
-                // Optionally save per-pose cloud before accumulating.
+                // Save per-pose cloud as .pcd in world frame.
                 if (save_per_pose_clouds_) {
-                    const std::string pose_path = save_dir_ + "/zivid_pose_" +
-                                                  std::to_string(i + 1) + "_" +
-                                                  timestamp_for_filename() + ".ply";
-                    save_cloud_to_ply(cloud, pose_path);
+                    const std::string pose_path =
+                        (out_dir / ("pose_" + std::to_string(i + 1) + ".pcd")).string();
+                    save_cloud_to_pcd(cloud, pose_path);
                     pose_result["pose_file"] = pose_path;
-                    VIAM_RESOURCE_LOG(info) << "Saved pose " << (i + 1) << " cloud to "
-                                            << pose_path;
+                    VIAM_RESOURCE_LOG(info) << "Saved pose " << (i + 1) << " to " << pose_path;
                 }
 
                 // Accumulate.
@@ -319,17 +338,21 @@ viam::sdk::ProtoStruct ZividStitcher::cmd_run_scan() {
             " poses — check logs for per-pose move/capture errors");
     }
 
-    VIAM_RESOURCE_LOG(info) << "Exporting ...";
-
-    // Export.
-    auto export_result = cmd_export({});
+    // Export merged cloud into the same output directory (in metres).
+    std::lock_guard<std::mutex> lock(scan_mutex_);
+    auto export_cloud = accumulated_cloud_->voxelDownsampled(voxel_size_mm_, 1);
+    export_cloud.transform(mm_to_m_matrix());
+    const std::string merged_path = (out_dir / "merged.ply").string();
+    save_cloud_to_ply(export_cloud, merged_path);
+    VIAM_RESOURCE_LOG(info) << "Exported " << export_cloud.size() << " points to " << merged_path;
 
     viam::sdk::ProtoStruct result;
+    result["output_dir"]      = out_dir.string();
+    result["output_file"]     = merged_path;
+    result["point_count"]     = static_cast<double>(export_cloud.size());
     result["poses_attempted"] = static_cast<double>(scan_poses_.size());
-    result["poses_captured"] = static_cast<double>(detected_count);
-    result["output_file"] = export_result.at("output_file");
-    result["point_count"] = export_result.at("point_count");
-    result["pose_results"] = viam::sdk::ProtoValue{std::move(pose_results)};
+    result["poses_captured"]  = static_cast<double>(detected_count);
+    result["pose_results"]    = viam::sdk::ProtoValue{std::move(pose_results)};
     return result;
 }
 
@@ -391,6 +414,50 @@ void ZividStitcher::save_cloud_to_ply(const Zivid::UnorganizedPointCloud& cloud,
             path,
             Zivid::Experimental::PointCloudExport::FileFormat::PLY::Layout::unordered,
             Zivid::Experimental::PointCloudExport::ColorSpace::sRGB});
+}
+
+void ZividStitcher::save_cloud_to_pcd(const Zivid::UnorganizedPointCloud& cloud,
+                                       const std::string& path) const {
+    // Write a binary PCD in meters (same convention as the camera's encode_pcd).
+    // Zivid UnorganizedPointCloud is in mm, so we scale by 1e-3.
+    const auto xyz    = cloud.copyPointsXYZ();
+    const auto colors = cloud.copyColorsRGBA_SRGB();
+    const size_t n    = cloud.size();
+
+    struct PcdPoint { float x, y, z, rgb; };
+    std::vector<PcdPoint> pts;
+    pts.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        const auto& p = xyz(i);
+        const auto& c = colors(i);
+        uint32_t rgb_packed = (static_cast<uint32_t>(c.r) << 16) |
+                              (static_cast<uint32_t>(c.g) <<  8) |
+                               static_cast<uint32_t>(c.b);
+        float rgb_float{};
+        std::memcpy(&rgb_float, &rgb_packed, sizeof(float));
+        pts.push_back({p.x * 1e-3f, p.y * 1e-3f, p.z * 1e-3f, rgb_float});
+    }
+
+    std::ostringstream hdr;
+    hdr << "VERSION 0.7\n"
+        << "FIELDS x y z rgb\n"
+        << "SIZE 4 4 4 4\n"
+        << "TYPE F F F F\n"
+        << "COUNT 1 1 1 1\n"
+        << "WIDTH " << n << "\n"
+        << "HEIGHT 1\n"
+        << "VIEWPOINT 0 0 0 1 0 0 0\n"
+        << "POINTS " << n << "\n"
+        << "DATA binary\n";
+
+    std::ofstream f(path, std::ios::binary);
+    if (!f.is_open())
+        throw std::runtime_error("ZividStitcher: cannot write PCD to " + path);
+    const std::string hdr_str = hdr.str();
+    f.write(hdr_str.data(), static_cast<std::streamsize>(hdr_str.size()));
+    if (n > 0)
+        f.write(reinterpret_cast<const char*>(pts.data()),
+                static_cast<std::streamsize>(n * sizeof(PcdPoint)));
 }
 
 viam::sdk::ProtoStruct ZividStitcher::cmd_capture_and_accumulate() {
