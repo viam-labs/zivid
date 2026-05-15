@@ -1,0 +1,42 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "viam:zivid",
+  "visibility": "private",
+  "url": "https://github.com/viam-labs/zivid",
+  "description": "Viam module for Zivid 3D cameras",
+  "models": [
+    {
+      "api": "rdk:component:camera",
+      "model": "viam:zivid:camera",
+      "short_description": "Camera component that streams color images, depth maps, and point clouds from a Zivid 3D camera.",
+      "markdown_link": "README.md#viamzividcamera"
+    },
+    {
+      "api": "rdk:service:discovery",
+      "model": "viam:zivid:discovery",
+      "short_description": "Discovery service that enumerates Zivid cameras connected to the machine.",
+      "markdown_link": "README.md#viamzividdiscovery"
+    },
+    {
+      "api": "rdk:service:generic",
+      "model": "viam:zivid:handeye-calibration",
+      "short_description": "Generic service that runs Zivid hand-eye calibration."
+    },
+    {
+      "api": "rdk:service:generic",
+      "model": "viam:zivid:stitcher",
+      "short_description": "Generic service that stitches multiple Zivid point clouds into a single accumulated cloud."
+    }
+  ],
+  "entrypoint": "viam-camera-zivid",
+  "first_run": "first_run.sh",
+  "build": {
+    "build": "make module.tar.gz",
+    "setup": "make setup",
+    "path": "module.tar.gz",
+    "arch": [
+      "linux/amd64",
+      "linux/arm64"
+    ]
+  }
+}

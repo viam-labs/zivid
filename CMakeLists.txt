@@ -48,4 +48,5 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 install(TARGETS ${PROJECT_NAME} DESTINATION .)
-install(FILES etc/meta.json DESTINATION .)
+install(FILES meta.json DESTINATION .)
+install(PROGRAMS first_run.sh DESTINATION .)
