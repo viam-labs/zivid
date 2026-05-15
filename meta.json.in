@@ -1,0 +1,27 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "viam:zivid",
+  "visibility": "private",
+  "description": "Viam module for Zivid 3D cameras",
+  "models": [
+    {
+      "api": "rdk:component:camera",
+      "model": "viam:camera:zivid"
+    },
+    {
+      "api": "rdk:service:discovery",
+      "model": "viam:zivid:discovery"
+    },
+    {
+      "api": "rdk:service:generic",
+      "model": "viam:zivid:handeye-calibration"
+    },
+    {
+      "api": "rdk:service:generic",
+      "model": "viam:zivid:stitcher"
+    }
+  ],
+  "entrypoint": "@CMAKE_INSTALL_BINDIR@/viam-camera-zivid",
+  "first_run": "first_run.sh",
+  "markdown_link": "README.md"
+}

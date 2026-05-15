@@ -1,7 +1,30 @@
-CMakeUserPresets.json
-bin/
+# Build output
+build/
 build-conan/
 module.tar.gz
+
+# Conan-generated files (appear at repo root because Makefile uses --output-folder=.)
+CMakeUserPresets.json
+CMakePresets.json
+conan_*.cmake
+conanbuild*
+conanrun*
+deactivate_conan*
+
+# Viam artifacts
+.VIAM_RELOAD_ARCHIVE.tar.gz
+
+# Python
 venv/
-.env
 .venv/
+__pycache__/
+*.pyc
+
+# Environment
+.env
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp

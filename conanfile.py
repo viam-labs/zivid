@@ -1,12 +1,9 @@
-import os
-import tarfile
 import re
-from tempfile import TemporaryDirectory
 
 from conan import ConanFile
 from conan.tools.build import check_min_cppstd
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
-from conan.tools.files import copy, load
+from conan.tools.files import load
 
 
 class ViamZivid(ConanFile):
@@ -20,7 +17,7 @@ class ViamZivid(ConanFile):
         "viam-cpp-sdk/*:shared": False,
     }
 
-    exports_sources = "CMakeLists.txt", "src/*", "etc/meta.json"
+    exports_sources = "CMakeLists.txt", "src/*", "meta.json.in", "bin/*"
 
     version = "0.1.0"
 
@@ -53,14 +50,3 @@ class ViamZivid(ConanFile):
     def package(self):
         cmake = CMake(self)
         cmake.install()
-
-    def deploy(self):
-        with TemporaryDirectory(dir=self.deploy_folder) as tmp_dir:
-            self.output.info("Deploying files to module.tar.gz")
-
-            copy(self, "viam-camera-zivid", src=self.package_folder, dst=tmp_dir)
-            copy(self, "meta.json", src=self.package_folder, dst=tmp_dir)
-
-            self.output.info("Creating module.tar.gz")
-            with tarfile.open(os.path.join(self.deploy_folder, "module.tar.gz"), "w|gz") as tar:
-                tar.add(tmp_dir, arcname=".", recursive=True)

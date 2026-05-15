@@ -1,49 +1,60 @@
-OUTPUT_NAME := viam-camera-zivid
-CONAN_OUTPUT := build-conan
-CMAKE_BUILD_DIR := $(CONAN_OUTPUT)/build/Release
-BIN_DIR := bin
-BINARY := viam-camera-zivid
+CONAN_FLAGS := -s:a build_type=Release -s:a compiler.cppstd=17
+BUILD_DIR := build/Release
 
-export CONAN_FLAGS := -s:a build_type=Release -s:a compiler.cppstd=17
+.PHONY: default conan-install configure build install module.tar.gz clean \
+        docker-amd64 docker-run
 
-.PHONY: setup build conan-build module.tar.gz clean check-sdk
+default: module.tar.gz
 
-default: build
-
-check-sdk:
-	@echo "Checking Zivid SDK..."
-	@if [ ! -f /usr/include/Zivid/Application.h ]; then \
-		echo "ERROR: Zivid SDK not found. Install from: https://www.zivid.com/downloads"; \
-		exit 1; \
-	fi
-	@echo "  Zivid SDK OK ($(shell dpkg -s zivid 2>/dev/null | grep Version | awk '{print $$2}'))"
-
-setup: check-sdk
-	bin/setup.sh
-
-build:
-	test -f ./venv/bin/activate && . ./venv/bin/activate; \
+conan-install:
 	conan install . \
-		--output-folder=$(CONAN_OUTPUT) \
+		--output-folder=. \
 		--build=missing \
 		$(CONAN_FLAGS)
-	test -f ./venv/bin/activate && . ./venv/bin/activate; \
+
+configure: conan-install
 	cmake --preset conan-release
-	test -f ./venv/bin/activate && . ./venv/bin/activate; \
-	cmake --build $(CMAKE_BUILD_DIR) --config Release
-	@mkdir -p $(BIN_DIR)
-	@cp $(CMAKE_BUILD_DIR)/$(BINARY) $(BIN_DIR)/$(BINARY)
-	@echo "Binary: $(BIN_DIR)/$(BINARY)"
-	@echo "Creating module.tar.gz..."
-	tar czf module.tar.gz \
-		-C $(BIN_DIR) $(BINARY) \
-		-C $(shell pwd)/etc meta.json
-	@echo "Created module.tar.gz"
+
+build: configure
+	cmake --build --preset conan-release -j$$(nproc)
+
+install: build
+	cmake --install $(BUILD_DIR)
 
 module.tar.gz: build
-
-conan-build: setup build
+	cmake --build $(BUILD_DIR) --target package
+	@echo "Built $(BUILD_DIR)/module.tar.gz"
 
 clean:
-	rm -rf $(CONAN_OUTPUT) $(BIN_DIR) module.tar.gz venv
-	@echo "Clean complete"
+	rm -rf build build-conan CMakeUserPresets.json module.tar.gz
+
+#
+# Docker — build environment image for linux/amd64, then run `make` inside.
+# Persistent named volumes cache conan deps and ccache between runs so
+# subsequent builds skip rebuilding Boost / gRPC / viam-cpp-sdk / etc.
+#
+IMAGE := viam-camera-zivid-build:amd64
+DOCKERFILE := Dockerfile
+CONAN_VOLUME := viam-zivid-conan
+CCACHE_VOLUME := viam-zivid-ccache
+
+docker-amd64:
+	docker buildx build --pull --load --platform linux/amd64 \
+		-f $(DOCKERFILE) -t $(IMAGE) .
+
+docker-run: docker-amd64
+	docker run --rm --platform linux/amd64 \
+		-v $(PWD):/src -w /src \
+		-v $(CONAN_VOLUME):/root/.conan2 \
+		-v $(CCACHE_VOLUME):/root/.ccache \
+		$(IMAGE) make module.tar.gz
+
+docker-shell: docker-amd64
+	docker run --rm -it --platform linux/amd64 \
+		-v $(PWD):/src -w /src \
+		-v $(CONAN_VOLUME):/root/.conan2 \
+		-v $(CCACHE_VOLUME):/root/.ccache \
+		$(IMAGE) bash
+
+docker-clean-cache:
+	docker volume rm $(CONAN_VOLUME) $(CCACHE_VOLUME) || true
