@@ -1,6 +1,7 @@
 CMakeUserPresets.json
 bin/*
 !bin/setup.sh
+!bin/install-zivid-sdk.sh
 build-conan/
 module.tar.gz
 venv/

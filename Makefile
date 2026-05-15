@@ -18,8 +18,9 @@ check-sdk:
 	fi
 	@echo "  Zivid SDK OK ($(shell dpkg -s zivid 2>/dev/null | grep Version | awk '{print $$2}'))"
 
-setup: check-sdk
+setup:
 	bin/setup.sh
+	@$(MAKE) --no-print-directory check-sdk
 
 build:
 	test -f ./venv/bin/activate && . ./venv/bin/activate; \
@@ -36,7 +37,7 @@ build:
 	@echo "Binary: $(BIN_DIR)/$(BINARY)"
 	@echo "Creating module.tar.gz..."
 	tar czf module.tar.gz \
-		-C $(BIN_DIR) $(BINARY) \
+		-C $(BIN_DIR) $(BINARY) install-zivid-sdk.sh \
 		-C $(shell pwd) meta.json first_run.sh
 	@echo "Created module.tar.gz"
 
