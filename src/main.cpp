@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
 
     auto camera_reg = std::make_shared<viam::sdk::ModelRegistration>(
         viam::sdk::API::get<viam::sdk::Camera>(),
-        viam::sdk::Model{"viam", "camera", "zivid"},
+        viam::sdk::Model{"viam", "zivid", "camera"},
         [app](viam::sdk::Dependencies deps, viam::sdk::ResourceConfig cfg) {
             return std::make_shared<viam_zivid::ZividCamera>(app, std::move(deps), cfg);
         });

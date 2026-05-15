@@ -37,7 +37,7 @@ build:
 	@echo "Creating module.tar.gz..."
 	tar czf module.tar.gz \
 		-C $(BIN_DIR) $(BINARY) \
-		-C $(shell pwd)/etc meta.json
+		-C $(shell pwd) meta.json first_run.sh
 	@echo "Created module.tar.gz"
 
 module.tar.gz: build
