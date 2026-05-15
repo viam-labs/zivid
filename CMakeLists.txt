@@ -49,4 +49,4 @@ target_link_libraries(${PROJECT_NAME}
 
 install(TARGETS ${PROJECT_NAME} DESTINATION .)
 install(FILES meta.json DESTINATION .)
-install(PROGRAMS first_run.sh DESTINATION .)
+install(PROGRAMS first_run.sh bin/install-zivid-sdk.sh DESTINATION .)

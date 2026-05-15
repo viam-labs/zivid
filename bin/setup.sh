@@ -49,6 +49,15 @@ elif [[ ${OS} == "darwin" ]]; then
     brew install cmake ninja pkg-config python
 fi
 
+if [[ ${OS} == "linux" ]]; then
+    # Default the SDK release for the build; first_run.sh installs the
+    # matching version at runtime on the deployment target. Override by
+    # setting ZIVID_SDK_RELEASE in the build environment (find current values
+    # on https://www.zivid.com/downloads).
+    export ZIVID_SDK_RELEASE="${ZIVID_SDK_RELEASE:-2.17.2+440b2367-1}"
+    bin/install-zivid-sdk.sh
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 not found in PATH. Aborting." >&2
     exit 1

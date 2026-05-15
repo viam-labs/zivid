@@ -20,7 +20,7 @@ class ViamZivid(ConanFile):
         "viam-cpp-sdk/*:shared": False,
     }
 
-    exports_sources = "CMakeLists.txt", "src/*", "meta.json", "first_run.sh"
+    exports_sources = "CMakeLists.txt", "src/*", "meta.json", "first_run.sh", "bin/install-zivid-sdk.sh"
 
     version = "0.1.0"
 
@@ -61,6 +61,7 @@ class ViamZivid(ConanFile):
             copy(self, "viam-camera-zivid", src=self.package_folder, dst=tmp_dir)
             copy(self, "meta.json", src=self.package_folder, dst=tmp_dir)
             copy(self, "first_run.sh", src=self.package_folder, dst=tmp_dir)
+            copy(self, "install-zivid-sdk.sh", src=self.package_folder, dst=tmp_dir)
 
             self.output.info("Creating module.tar.gz")
             with tarfile.open(os.path.join(self.deploy_folder, "module.tar.gz"), "w|gz") as tar:
