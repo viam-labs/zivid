@@ -78,7 +78,16 @@ case "$INSTALL_MODE" in
         ;;
     extract)
         echo "Extracting package contents (Ubuntu .deb on Debian, no dpkg state)..."
-        sudo dpkg-deb --extract "${WORKDIR}/${ZIVID_DEB}" /
+        # Recent Ubuntu .deb's compress data.tar with zstd, which dpkg-deb
+        # on Debian bullseye (dpkg 1.20) can't read. Unpack the outer ar
+        # archive ourselves and let tar handle the inner payload — that
+        # works regardless of whether it's .zst, .xz, or .gz.
+        sudo apt-get install -y --no-install-recommends zstd
+        UNPACK_DIR="${WORKDIR}/unpack"
+        mkdir -p "${UNPACK_DIR}"
+        ( cd "${UNPACK_DIR}" && ar x "${WORKDIR}/${ZIVID_DEB}" )
+        DATA_TAR=$(ls "${UNPACK_DIR}"/data.tar.* | head -n1)
+        sudo tar -axf "${DATA_TAR}" -C /
         sudo ldconfig
         ;;
 esac
