@@ -15,11 +15,10 @@ jobs:
     env:
       # Configure these as repository Actions variables (Settings →
       # Secrets and variables → Actions → Variables). The Zivid release
-      # identifiers include a git-hash suffix (e.g. "2.17.2+90cfdc4b-1") and
-      # change with each Zivid SDK release — find the current values at
+      # identifier includes a git-hash suffix (e.g. "2.17.2+90cfdc4b-1") and
+      # changes with each Zivid SDK release — find the current value at
       # https://www.zivid.com/downloads.
       ZIVID_SDK_RELEASE: ${{ vars.ZIVID_SDK_RELEASE }}
-      ZIVID_TELICAM_RELEASE: ${{ vars.ZIVID_TELICAM_RELEASE }}
       # URL of the Conan remote that hosts the viam-cpp-sdk recipe.
       VIAM_CONAN_REMOTE: ${{ vars.VIAM_CONAN_REMOTE }}
     steps:
@@ -29,9 +28,8 @@ jobs:
       - name: Check required variables
         run: |
           missing=()
-          [[ -z "$ZIVID_SDK_RELEASE" ]]       && missing+=("ZIVID_SDK_RELEASE")
-          [[ -z "$ZIVID_TELICAM_RELEASE" ]]   && missing+=("ZIVID_TELICAM_RELEASE")
-          [[ -z "$VIAM_CONAN_REMOTE" ]]       && missing+=("VIAM_CONAN_REMOTE")
+          [[ -z "$ZIVID_SDK_RELEASE" ]] && missing+=("ZIVID_SDK_RELEASE")
+          [[ -z "$VIAM_CONAN_REMOTE" ]] && missing+=("VIAM_CONAN_REMOTE")
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing repository Actions variables: ${missing[*]}"
             echo "Configure them under Settings → Secrets and variables → Actions → Variables."
@@ -48,13 +46,10 @@ jobs:
         run: |
           ARCH=$(dpkg --print-architecture)
           BASE_URL="https://downloads.zivid.com/sdk/releases"
-          TELICAM_DEB="zivid-telicam-driver_${ZIVID_TELICAM_RELEASE}_${ARCH}.deb"
           ZIVID_DEB="zivid_${ZIVID_SDK_RELEASE}_${ARCH}.deb"
           curl --fail --silent --show-error --location \
-            "${BASE_URL}/${ZIVID_TELICAM_RELEASE}/u22/${TELICAM_DEB}" -o "${TELICAM_DEB}"
-          curl --fail --silent --show-error --location \
             "${BASE_URL}/${ZIVID_SDK_RELEASE}/u22/${ZIVID_DEB}" -o "${ZIVID_DEB}"
-          sudo apt-get install -y --no-install-recommends "./${TELICAM_DEB}" "./${ZIVID_DEB}"
+          sudo apt-get install -y --no-install-recommends "./${ZIVID_DEB}"
 
       - name: Install Conan
         run: |
