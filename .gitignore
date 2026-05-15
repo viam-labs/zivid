@@ -1,5 +1,6 @@
 CMakeUserPresets.json
-bin/
+bin/*
+!bin/setup.sh
 build-conan/
 module.tar.gz
 venv/
