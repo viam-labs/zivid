@@ -5,9 +5,19 @@
 # Requires ZIVID_SDK_RELEASE to be set to a release identifier including the
 # git-hash suffix Zivid uses on their downloads server, e.g.
 # "2.17.2+440b2367-1". Find current values at https://www.zivid.com/downloads.
+#
+# Zivid publishes .deb packages targeting Ubuntu 20.04 / 22.04 / 24.04. On
+# Ubuntu hosts we install via apt so dpkg state and udev rules are set up
+# correctly. On Debian hosts (e.g. the Viam cloud build agent runs Debian
+# bullseye/bookworm) we pick the Ubuntu .deb whose glibc generation matches
+# and extract the files with dpkg-deb -x: that gives the build the headers
+# and shared libraries without inviting apt to resolve Ubuntu-only deps
+# against Debian's package set.
 set -euo pipefail
 
-if dpkg -s zivid >/dev/null 2>&1; then
+# Either a registered package or the headers on disk (extracted path) counts
+# as "already installed" — the build only needs the files in /usr.
+if dpkg -s zivid >/dev/null 2>&1 || [[ -f /usr/include/Zivid/Application.h ]]; then
     echo "Zivid SDK already installed."
     exit 0
 fi
@@ -29,17 +39,18 @@ if [[ ! -f /etc/os-release ]]; then
 fi
 # shellcheck disable=SC1091
 . /etc/os-release
-if [[ "${ID:-}" != "ubuntu" ]]; then
-    echo "install-zivid-sdk.sh: only Ubuntu is supported (got ID=${ID:-unknown})" >&2
-    exit 1
-fi
 
-case "${VERSION_ID:-}" in
-    20.04) UBUNTU_TAG="u20" ;;
-    22.04) UBUNTU_TAG="u22" ;;
-    24.04) UBUNTU_TAG="u24" ;;
+# Map (distro, version) → (Ubuntu .deb flavor, install mode). For Debian we
+# pick the closest glibc match: bullseye (2.31) ≈ Ubuntu 20.04, bookworm
+# (2.36) ≈ Ubuntu 22.04.
+case "${ID:-},${VERSION_ID:-}" in
+    ubuntu,20.04) UBUNTU_TAG="u20"; INSTALL_MODE="apt" ;;
+    ubuntu,22.04) UBUNTU_TAG="u22"; INSTALL_MODE="apt" ;;
+    ubuntu,24.04) UBUNTU_TAG="u24"; INSTALL_MODE="apt" ;;
+    debian,11)    UBUNTU_TAG="u20"; INSTALL_MODE="extract" ;;
+    debian,12)    UBUNTU_TAG="u22"; INSTALL_MODE="extract" ;;
     *)
-        echo "install-zivid-sdk.sh: unsupported Ubuntu version ${VERSION_ID:-unknown}" >&2
+        echo "install-zivid-sdk.sh: unsupported distribution ${ID:-unknown}/${VERSION_ID:-unknown}" >&2
         exit 1
         ;;
 esac
@@ -59,7 +70,17 @@ curl --fail --silent --show-error --location \
     "https://downloads.zivid.com/sdk/releases/${ZIVID_SDK_RELEASE}/${UBUNTU_TAG}/${ZIVID_DEB}" \
     -o "${WORKDIR}/${ZIVID_DEB}"
 
-echo "Installing package..."
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends "${WORKDIR}/${ZIVID_DEB}"
+case "$INSTALL_MODE" in
+    apt)
+        echo "Installing package via apt..."
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends "${WORKDIR}/${ZIVID_DEB}"
+        ;;
+    extract)
+        echo "Extracting package contents (Ubuntu .deb on Debian, no dpkg state)..."
+        sudo dpkg-deb --extract "${WORKDIR}/${ZIVID_DEB}" /
+        sudo ldconfig
+        ;;
+esac
+
 echo "Zivid SDK install complete."
