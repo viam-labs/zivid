@@ -139,8 +139,14 @@ ZividHandEyeCalibration::ZividHandEyeCalibration(viam::sdk::Dependencies deps,
         (dict_it != attrs.end()) ? dict_it->second.get_unchecked<std::string>() : "aruco4x4_50";
 
     // Wire up arm dependency.
-    auto arm_resource = deps.at(viam::sdk::Name{viam::sdk::API::get<viam::sdk::Arm>(), "", arm_name_});
-    arm_ = std::dynamic_pointer_cast<viam::sdk::Arm>(arm_resource);
+    const auto arm_dep_name = viam::sdk::Name{viam::sdk::API::get<viam::sdk::Arm>(), "", arm_name_};
+    auto arm_it = deps.find(arm_dep_name);
+    if (arm_it == deps.end()) {
+        throw std::invalid_argument(
+            "ZividHandEyeCalibration: arm '" + arm_name_ +
+            "' not found in dependencies — add it to the service's 'depends_on' list");
+    }
+    arm_ = std::dynamic_pointer_cast<viam::sdk::Arm>(arm_it->second);
     if (!arm_) {
         throw std::runtime_error("ZividHandEyeCalibration: dependency '" + arm_name_ +
                                  "' is not an Arm component");
