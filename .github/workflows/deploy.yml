@@ -13,7 +13,7 @@ permissions:
 
 env:
   VIAM_CLI_BASE_URL: https://storage.googleapis.com/packages.viam.com/apps/viam-cli
-  VIAM_VERSION: ${{ inputs.version || github.ref_name }}
+  MODULE_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   update-meta:
@@ -112,6 +112,6 @@ jobs:
         run: |
           viam module upload \
             --module meta.json \
-            --version "$VIAM_VERSION" \
+            --version "$MODULE_VERSION" \
             --platform "$PLATFORM" \
             module.tar.gz
