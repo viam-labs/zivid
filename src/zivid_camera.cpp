@@ -491,7 +491,7 @@ viam::sdk::Camera::properties ZividCamera::get_properties() {
     }
 
     const auto& dist = intrinsics.distortion();
-    props.distortion_parameters.model = "plumb_bob";
+    props.distortion_parameters.model = "brown_conrady";
     props.distortion_parameters.parameters = std::vector<double>{
         dist.k1().value(), dist.k2().value(), dist.p1().value(),
         dist.p2().value(), dist.k3().value()};
