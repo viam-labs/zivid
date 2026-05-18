@@ -11,19 +11,107 @@ on:
 permissions:
   contents: read
 
+env:
+  VIAM_CLI_BASE_URL: https://storage.googleapis.com/packages.viam.com/apps/viam-cli
+  MODULE_VERSION: ${{ inputs.version || github.ref_name }}
+
 jobs:
-  publish-module:
-    runs-on: ubuntu-24.04
+  update-meta:
+    runs-on: ubuntu-22.04
     steps:
       # actions/checkout@v6.0.2
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Build and upload to Viam Registry
-        # viamrobotics/build-action@v1.7
-        uses: viamrobotics/build-action@cd35d596eabba93e9b6776f708c54865ec1c8360
         with:
-          version: ${{ inputs.version || github.ref_name }}
           ref: ${{ github.sha }}
-          key-id: ${{ secrets.viam_key_id }}
-          key-value: ${{ secrets.viam_key_secret }}
-          token: ${{ github.token }}
+
+      - name: Install Viam CLI
+        run: |
+          curl --fail --silent --show-error --location \
+            "${VIAM_CLI_BASE_URL}/viam-cli-stable-linux-amd64" -o viam
+          chmod +x viam
+          sudo mv viam /usr/local/bin/viam
+
+      - name: Authenticate with Viam
+        env:
+          VIAM_KEY_ID: ${{ secrets.VIAM_KEY_ID }}
+          VIAM_KEY_VALUE: ${{ secrets.VIAM_KEY_SECRET }}
+        run: viam login api-key --key-id "$VIAM_KEY_ID" --key "$VIAM_KEY_VALUE"
+
+      - name: Update module metadata
+        run: viam module update --module meta.json
+
+  build-and-upload:
+    needs: update-meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux/amd64
+            arch: amd64
+          - runner: ubuntu-22.04-arm
+            platform: linux/arm64
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      ZIVID_SDK_RELEASE: ${{ vars.ZIVID_SDK_RELEASE }}
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Check required variables
+        run: |
+          if [[ -z "$ZIVID_SDK_RELEASE" ]]; then
+            echo "::error::Missing repository Actions variable: ZIVID_SDK_RELEASE"
+            echo "Configure it under Settings → Secrets and variables → Actions → Variables."
+            exit 1
+          fi
+
+      - name: Install Zivid SDK
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          ZIVID_DEB="zivid_${ZIVID_SDK_RELEASE}_${ARCH}.deb"
+          curl --fail --silent --show-error --location \
+            "https://downloads.zivid.com/sdk/releases/${ZIVID_SDK_RELEASE}/u22/${ZIVID_DEB}" \
+            -o "${ZIVID_DEB}"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "./${ZIVID_DEB}"
+
+      - name: Setup
+        run: make setup
+
+      - name: Build module.tar.gz
+        run: make module.tar.gz
+
+      - name: Verify build artifact
+        run: |
+          test -f module.tar.gz
+          tar tzf module.tar.gz | sort
+
+      - name: Install Viam CLI
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          curl --fail --silent --show-error --location \
+            "${VIAM_CLI_BASE_URL}/viam-cli-stable-linux-${ARCH}" -o viam
+          chmod +x viam
+          sudo mv viam /usr/local/bin/viam
+
+      - name: Authenticate with Viam
+        env:
+          VIAM_KEY_ID: ${{ secrets.VIAM_KEY_ID }}
+          VIAM_KEY_VALUE: ${{ secrets.VIAM_KEY_SECRET }}
+        run: viam login api-key --key-id "$VIAM_KEY_ID" --key "$VIAM_KEY_VALUE"
+
+      - name: Upload module artifact
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          viam module upload \
+            --module meta.json \
+            --version "$MODULE_VERSION" \
+            --platform "$PLATFORM" \
+            module.tar.gz
