@@ -56,10 +56,16 @@ case "${ID:-},${VERSION_ID:-}" in
 esac
 
 ARCH="$(dpkg --print-architecture)"
-if [[ "$ARCH" != "amd64" && "$ARCH" != "arm64" ]]; then
-    echo "install-zivid-sdk.sh: unsupported architecture $ARCH" >&2
-    exit 1
-fi
+case "$ARCH" in
+    amd64) ARCH_SUBPATH="" ;;
+    # Zivid hosts arm64 .deb's one directory deeper than amd64
+    # (e.g. .../u22/arm64/zivid_<rel>_arm64.deb).
+    arm64) ARCH_SUBPATH="arm64/" ;;
+    *)
+        echo "install-zivid-sdk.sh: unsupported architecture $ARCH" >&2
+        exit 1
+        ;;
+esac
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -67,7 +73,7 @@ ZIVID_DEB="zivid_${ZIVID_SDK_RELEASE}_${ARCH}.deb"
 
 echo "Downloading Zivid SDK ${ZIVID_SDK_RELEASE} (${UBUNTU_TAG}/${ARCH})..."
 curl --fail --silent --show-error --location \
-    "https://downloads.zivid.com/sdk/releases/${ZIVID_SDK_RELEASE}/${UBUNTU_TAG}/${ZIVID_DEB}" \
+    "https://downloads.zivid.com/sdk/releases/${ZIVID_SDK_RELEASE}/${UBUNTU_TAG}/${ARCH_SUBPATH}${ZIVID_DEB}" \
     -o "${WORKDIR}/${ZIVID_DEB}"
 
 case "$INSTALL_MODE" in
