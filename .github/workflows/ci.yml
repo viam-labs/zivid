@@ -34,10 +34,14 @@ jobs:
       - name: Install Zivid SDK
         run: |
           ARCH=$(dpkg --print-architecture)
-          BASE_URL="https://downloads.zivid.com/sdk/releases"
+          # Zivid hosts arm64 .deb's one directory deeper than amd64
+          # (e.g. .../u22/arm64/zivid_<rel>_arm64.deb).
+          ARCH_SUBPATH=""
+          [[ "$ARCH" == "arm64" ]] && ARCH_SUBPATH="arm64/"
           ZIVID_DEB="zivid_${ZIVID_SDK_RELEASE}_${ARCH}.deb"
           curl --fail --silent --show-error --location \
-            "${BASE_URL}/${ZIVID_SDK_RELEASE}/u22/${ZIVID_DEB}" -o "${ZIVID_DEB}"
+            "https://downloads.zivid.com/sdk/releases/${ZIVID_SDK_RELEASE}/u22/${ARCH_SUBPATH}${ZIVID_DEB}" \
+            -o "${ZIVID_DEB}"
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "./${ZIVID_DEB}"
 
