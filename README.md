@@ -418,6 +418,55 @@ Response: `{"cleared_count": <n>}`.
 
 ---
 
+## Linux runtime prerequisites
+
+The Zivid SDK uses OpenCL for point-cloud reconstruction, HDR merging, and ROI filtering. On a fresh Linux machine OpenCL is not installed by default and the module will fail to capture frames until the runtime is set up.
+
+### 1. Install the OpenCL ICD loader
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ocl-icd-libopencl1 clinfo
+```
+
+### 2. Install a vendor ICD for your hardware
+
+| Hardware              | Package / source                                                |
+| --------------------- | --------------------------------------------------------------- |
+| Intel iGPU / CPU      | `intel-opencl-icd`                                              |
+| AMD GPU (open source) | `mesa-opencl-icd`                                               |
+| AMD GPU (ROCm)        | install ROCm runtime per AMD's documentation                    |
+| NVIDIA GPU            | install the proprietary NVIDIA driver — OpenCL ICD is bundled   |
+
+For example, on an Intel host:
+
+```bash
+sudo apt-get install -y intel-opencl-icd
+```
+
+### 3. Grant the `viam` user GPU access
+
+`viam-agent` runs as the `viam` user, which must be in the `render` and `video` groups to access `/dev/dri/*`:
+
+```bash
+sudo usermod -aG render,video viam
+sudo reboot
+```
+
+A reboot (or at minimum a restart of `viam-agent`) is required for the new group membership to take effect.
+
+### 4. Verify
+
+```bash
+clinfo | head -20
+ls /etc/OpenCL/vendors/   # should list the vendor ICD installed above
+ls -l /dev/dri/           # render/card nodes should exist
+```
+
+`clinfo` should report at least one OpenCL platform and one device. If it prints `Number of platforms: 0`, the vendor ICD is missing or not registered under `/etc/OpenCL/vendors/`.
+
+---
+
 ## Building
 
 ### Prerequisites
