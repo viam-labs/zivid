@@ -576,6 +576,49 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         return result;
     }
 
+    if (cmd == "save_zdf") {
+        std::string path;
+        auto path_it = command.find("path");
+        if (path_it != command.end()) {
+            path = path_it->second.get_unchecked<std::string>();
+        } else {
+            const auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+            path = "/var/lib/viam/zivid_diagnostic_" +
+                   camera_.info().serialNumber().value() + "_" +
+                   std::to_string(ts) + ".zdf";
+        }
+
+        Zivid::Settings diag_settings = settings_;
+        diag_settings.set(Zivid::Settings::Diagnostics::Enabled{true});
+
+        std::unique_lock<std::mutex> lock(capture_mutex_);
+        capture_cv_.wait(lock, [this] { return !capturing_; });
+        capturing_ = true;
+        lock.unlock();
+
+        VIAM_RESOURCE_LOG(info) << "diagnostic capture begin (saving to " << path << ")";
+        try {
+            Zivid::Frame frame = camera_.capture2D3D(diag_settings);
+            frame.save(path);
+        } catch (...) {
+            lock.lock();
+            capturing_ = false;
+            capture_cv_.notify_all();
+            throw;
+        }
+        VIAM_RESOURCE_LOG(info) << "diagnostic capture saved";
+
+        lock.lock();
+        capturing_ = false;
+        capture_cv_.notify_all();
+
+        viam::sdk::ProtoStruct result;
+        result["path"] = path;
+        return result;
+    }
+
     if (cmd == "get_camera_state") {
         const auto state = camera_.state();
 

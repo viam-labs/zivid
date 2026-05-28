@@ -188,6 +188,36 @@ Response:
 
 `mode` is either `dhcp` or `manual`. `address` and `subnet_mask` are only meaningful when `mode` is `manual`.
 
+##### `save_zdf`
+
+Captures a single frame with **Zivid diagnostics enabled** and writes it as a `.zdf` file on the machine running the module. Use this to produce a diagnostic capture for Zivid support.
+
+```python
+# Default path (/var/lib/viam/zivid_diagnostic_<serial>_<timestamp>.zdf):
+result = camera.do_command({"command": "save_zdf"})
+
+# Custom path:
+result = camera.do_command({"command": "save_zdf", "path": "/var/lib/viam/issue.zdf"})
+```
+
+Arguments:
+
+| Name   | Type   | Required | Description                                                                                          |
+| ------ | ------ | -------- | ---------------------------------------------------------------------------------------------------- |
+| `path` | string | No       | Absolute path to write the `.zdf` to. Default: `/var/lib/viam/zivid_diagnostic_<serial>_<ms>.zdf`.   |
+
+Response:
+
+```json
+{"path": "/var/lib/viam/zivid_diagnostic_<serial>_<ms>.zdf"}
+```
+
+Notes:
+
+- The capture is taken with the current configured `acquisitions`/`engine`/`roi` settings, plus `Diagnostics::Enabled=true`, so the resulting file contains the extra data Zivid support needs to investigate issues.
+- Diagnostic captures bypass the frame cache and take longer than a normal capture.
+- The file is written on the host running `viam-agent` — retrieve it via SSH/SCP (or whatever file access the host allows) and send it to Zivid support.
+
 ---
 
 ### `viam:zivid:discovery`
