@@ -44,6 +44,18 @@ struct DepthRoiConfig {
     double max;
 };
 
+// Maps to Zivid::Settings::Processing::Filters::Noise::Removal.
+// Raising the threshold discards more low-confidence (noisy/floating) points;
+// lowering it keeps more data. Zivid SDK default is enabled at threshold ~7.
+struct NoiseRemovalConfig {
+    std::optional<bool> enabled;
+    std::optional<double> threshold;
+};
+
+struct ProcessingConfig {
+    std::optional<NoiseRemovalConfig> noise_removal;
+};
+
 struct Config {
     std::optional<std::string> serial_number;
     std::vector<AcquisitionConfig> acquisitions;     // 3D capture
@@ -51,6 +63,7 @@ struct Config {
     std::optional<std::string> engine;
     std::optional<BoxRoiConfig> box_roi;
     std::optional<DepthRoiConfig> depth_roi;
+    std::optional<ProcessingConfig> processing;
 };
 
 Config parse_config(const viam::sdk::ResourceConfig& cfg);

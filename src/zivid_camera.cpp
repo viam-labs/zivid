@@ -256,6 +256,23 @@ Zivid::Settings make_settings(const Config& config) {
                 Zivid::Settings::RegionOfInterest::Box::Extents{b.extents_min, b.extents_max}}});
     }
 
+    if (config.processing && config.processing->noise_removal) {
+        const auto& nr = *config.processing->noise_removal;
+        using NoiseRemoval = Zivid::Settings::Processing::Filters::Noise::Removal;
+        if (nr.enabled)
+            settings.set(NoiseRemoval::Enabled{*nr.enabled});
+        if (nr.threshold) {
+            const auto range = NoiseRemoval::Threshold::validRange();
+            const double clamped = std::min(std::max(*nr.threshold, range.min()), range.max());
+            if (clamped != *nr.threshold) {
+                std::cerr << "[ZividCamera] noise removal threshold " << *nr.threshold
+                          << " outside valid range [" << range.min() << ", " << range.max()
+                          << "], clamping to " << clamped << "\n";
+            }
+            settings.set(NoiseRemoval::Threshold{clamped});
+        }
+    }
+
     return settings;
 }
 
@@ -325,6 +342,22 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
                 attr<double>(extents, "min").value_or(0.0),
                 attr<double>(extents, "max").value_or(0.0)};
         }
+    }
+
+    auto proc_it = attrs.find("processing");
+    if (proc_it != attrs.end()) {
+        const auto& proc = proc_it->second.get_unchecked<viam::sdk::ProtoStruct>();
+        ProcessingConfig pc;
+
+        auto nr_it = proc.find("noise_removal");
+        if (nr_it != proc.end()) {
+            const auto& nr = nr_it->second.get_unchecked<viam::sdk::ProtoStruct>();
+            pc.noise_removal = NoiseRemovalConfig{
+                attr<bool>(nr, "enabled"),
+                attr<double>(nr, "threshold")};
+        }
+
+        result.processing = pc;
     }
 
     return result;

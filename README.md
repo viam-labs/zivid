@@ -54,6 +54,7 @@ Camera component that streams color images, depth maps, and point clouds from a 
 | `engine`        | string | No       | Zivid Vision Engine to use. Valid values: `phase`, `stripe`, `omni`, `sage`. Default: camera default.                                      |
 | `acquisitions`  | list   | No       | List of acquisition configurations. Multiple entries enable HDR capture. Defaults to a single acquisition with camera defaults if omitted. |
 | `roi`           | object | No       | Region of interest. See below.                                                                                                             |
+| `processing`    | object | No       | Point-cloud processing filters. See below.                                                                                                 |
 
 Each entry in `acquisitions` supports:
 
@@ -104,6 +105,28 @@ Both ROI types are optional and can be used independently or together.
 ```
 
 All coordinates are in **millimetres** relative to the **camera frame**.
+
+#### Processing filters
+
+Maps to `Zivid::Settings::Processing::Filters`. Only the noise removal filter is exposed today.
+
+**Noise removal** — discards low-confidence points. Raising the threshold removes more noisy/floating points at the cost of leaving holes (missing data); lowering it keeps more data. This is the same control as the "Noise → Removal → Threshold" slider in Zivid Studio. If omitted, the camera's SDK default is used (enabled, threshold ≈ 7).
+
+```json
+"processing": {
+  "noise_removal": {
+    "enabled": true,
+    "threshold": 8.0
+  }
+}
+```
+
+| Name        | Type  | Required | Description                                                                                                       |
+| ----------- | ----- | -------- | ----------------------------------------------------------------------------------------------------------------- |
+| `enabled`   | bool  | No       | Enable/disable the noise removal filter.                                                                          |
+| `threshold` | float | No       | Higher = remove more noise (fewer floating points, more holes). Valid range depends on camera; clamped if exceeded. |
+
+> Note: noise removal trims floating points but can leave missing data. Per Zivid support, the more robust fix for points "skirting" a vertical surface is to angle the camera (a slight `rx`/`ry` rotation) so the projection isn't grazing the surface.
 
 #### Image sources
 
