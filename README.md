@@ -48,13 +48,15 @@ Camera component that streams color images, depth maps, and point clouds from a 
 
 #### Attributes
 
-| Name            | Type   | Required | Description                                                                                                                                |
-| --------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `serial_number` | string | No       | Serial number of the camera to connect to. If omitted, connects to the first available camera.                                             |
-| `engine`        | string | No       | Zivid Vision Engine to use. Valid values: `phase`, `stripe`, `omni`, `sage`. Default: camera default.                                      |
-| `acquisitions`  | list   | No       | List of acquisition configurations. Multiple entries enable HDR capture. Defaults to a single acquisition with camera defaults if omitted. |
-| `roi`           | object | No       | Region of interest. See below.                                                                                                             |
-| `processing`    | object | No       | Point-cloud processing filters. See below.                                                                                                 |
+| Name                   | Type   | Required | Description                                                                                                                                 |
+| ---------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serial_number`        | string | No       | Serial number of the camera to connect to. If omitted, connects to the first available camera.                                              |
+| `engine`               | string | No       | Zivid Vision Engine to use. Valid values: `phase`, `stripe`, `omni`, `sage`. Default: camera default.                                       |
+| `acquisitions`         | list   | No       | List of acquisition configurations. Multiple entries enable HDR capture. Defaults to a single acquisition with camera defaults if omitted.  |
+| `pixel_sampling`       | string | No       | 3D (depth / point cloud) resolution. Subsamples or bins the sensor readout — fewer points and **faster capture + processing**. Valid values: `all`, `by2x2`, `by4x4`, `blueSubsample2x2`, `blueSubsample4x4`, `redSubsample2x2`, `redSubsample4x4`. Default: `all` (full resolution). |
+| `color_pixel_sampling` | string | No       | 2D color resolution (also the color baked into the point cloud). Same valid values as `pixel_sampling`. Default: `all`.                      |
+| `roi`                  | object | No       | Region of interest. See below.                                                                                                              |
+| `processing`           | object | No       | Point-cloud processing filters. See below.                                                                                                  |
 
 Each entry in `acquisitions` supports:
 
@@ -120,6 +122,18 @@ Maps to `Zivid::Settings::Processing::Filters`. Only the noise removal filter is
   }
 }
 ```
+
+#### Resolution and capture time
+
+`pixel_sampling` controls the 3D (depth) resolution by subsampling/binning the sensor readout at acquisition time. Because the camera reads out and processes fewer pixels, lowering it is the most direct way to **speed up captures** — `by2x2` yields roughly 1/4 the points, `by4x4` roughly 1/16.
+
+```json
+"pixel_sampling": "by2x2"
+```
+
+The point cloud stays fully colored at any resolution — each (now larger) point still carries its color, so it just looks chunkier, never uncolored. `color_pixel_sampling` separately controls the 2D color image resolution; leave it at `all` to keep crisp color while the depth runs at reduced resolution.
+
+> The Zivid SDK validates pixel-sampling combinations and will reject incompatible `pixel_sampling`/`color_pixel_sampling` pairings at capture time. If you hit such an error, set both to the same mode.
 
 | Name        | Type  | Required | Description                                                                                                       |
 | ----------- | ----- | -------- | ----------------------------------------------------------------------------------------------------------------- |
