@@ -195,6 +195,24 @@ Zivid::Settings2D::Acquisition make_acquisition_2d(const AcquisitionConfig& a) {
     return acq;
 }
 
+// Maps a config string to a Zivid pixel-sampling value. Both the 3D
+// (Zivid::Settings::Sampling::Pixel) and 2D (Zivid::Settings2D::Sampling::Pixel)
+// enums share the same member names, so this templates over the ValueType.
+template <typename ValueType>
+ValueType parse_pixel_sampling(const std::string& s, const char* what) {
+    if (s == "all") return ValueType::all;
+    if (s == "by2x2") return ValueType::by2x2;
+    if (s == "by4x4") return ValueType::by4x4;
+    if (s == "blueSubsample2x2") return ValueType::blueSubsample2x2;
+    if (s == "blueSubsample4x4") return ValueType::blueSubsample4x4;
+    if (s == "redSubsample2x2") return ValueType::redSubsample2x2;
+    if (s == "redSubsample4x4") return ValueType::redSubsample4x4;
+    throw std::invalid_argument(
+        std::string(what) + " '" + s +
+        "' is invalid. Valid values: all, by2x2, by4x4, blueSubsample2x2, "
+        "blueSubsample4x4, redSubsample2x2, redSubsample4x4.");
+}
+
 Zivid::Settings make_settings(const Config& config) {
     Zivid::Settings::Acquisitions acquisitions;
     for (const auto& a : config.acquisitions) {
@@ -209,9 +227,22 @@ Zivid::Settings make_settings(const Config& config) {
         acquisitions_2d.emplaceBack(Zivid::Settings2D::Acquisition{});
     }
 
+    Zivid::Settings2D settings_2d{acquisitions_2d};
+    if (config.color_pixel_sampling) {
+        settings_2d.set(Zivid::Settings2D::Sampling::Pixel{
+            parse_pixel_sampling<Zivid::Settings2D::Sampling::Pixel::ValueType>(
+                *config.color_pixel_sampling, "color_pixel_sampling")});
+    }
+
     Zivid::Settings settings{
         acquisitions,
-        Zivid::Settings::Color{Zivid::Settings2D{acquisitions_2d}}};
+        Zivid::Settings::Color{settings_2d}};
+
+    if (config.pixel_sampling) {
+        settings.set(Zivid::Settings::Sampling::Pixel{
+            parse_pixel_sampling<Zivid::Settings::Sampling::Pixel::ValueType>(
+                *config.pixel_sampling, "pixel_sampling")});
+    }
 
     if (config.engine) {
         const auto& e = *config.engine;
@@ -281,8 +312,10 @@ Zivid::Settings make_settings(const Config& config) {
 Config parse_config(const viam::sdk::ResourceConfig& cfg) {
     Config result;
     const auto& attrs = cfg.attributes();
-    result.serial_number = attr<std::string>(attrs, "serial_number");
-    result.engine        = attr<std::string>(attrs, "engine");
+    result.serial_number        = attr<std::string>(attrs, "serial_number");
+    result.engine               = attr<std::string>(attrs, "engine");
+    result.pixel_sampling       = attr<std::string>(attrs, "pixel_sampling");
+    result.color_pixel_sampling = attr<std::string>(attrs, "color_pixel_sampling");
 
     auto parse_acquisitions = [&](const std::string& key) {
         std::vector<AcquisitionConfig> out;

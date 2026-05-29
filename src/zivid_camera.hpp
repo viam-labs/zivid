@@ -64,6 +64,14 @@ struct Config {
     std::optional<BoxRoiConfig> box_roi;
     std::optional<DepthRoiConfig> depth_roi;
     std::optional<ProcessingConfig> processing;
+    // Maps to Zivid::Settings::Sampling::Pixel — subsamples/bins the 3D sensor
+    // readout. Lower resolution means fewer points and faster capture+processing.
+    // Valid: all, by2x2, by4x4, blueSubsample2x2, blueSubsample4x4,
+    // redSubsample2x2, redSubsample4x4. Defaults to the SDK default (all) when unset.
+    std::optional<std::string> pixel_sampling;
+    // Maps to Zivid::Settings2D::Sampling::Pixel — resolution of the 2D color
+    // capture (and the color baked into the point cloud). Same valid values.
+    std::optional<std::string> color_pixel_sampling;
 };
 
 Config parse_config(const viam::sdk::ResourceConfig& cfg);
