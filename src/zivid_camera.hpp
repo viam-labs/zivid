@@ -123,6 +123,10 @@ class ZividCamera : public viam::sdk::Camera {
     std::shared_ptr<Zivid::Application> app_;
     Zivid::Camera camera_;
     Zivid::Settings settings_;
+    // The 2D color settings embedded in settings_, kept separately so
+    // get_properties() can estimate intrinsics for the exact resolution of the
+    // 2D color image returned by get_images().
+    Zivid::Settings2D settings_2d_;
 
     std::mutex capture_mutex_;
     std::condition_variable capture_cv_;
