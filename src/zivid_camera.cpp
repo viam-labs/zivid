@@ -213,12 +213,10 @@ ValueType parse_pixel_sampling(const std::string& s, const char* what) {
         "blueSubsample4x4, redSubsample2x2, redSubsample4x4.");
 }
 
-Zivid::Settings make_settings(const Config& config) {
-    Zivid::Settings::Acquisitions acquisitions;
-    for (const auto& a : config.acquisitions) {
-        acquisitions.emplaceBack(make_acquisition(a));
-    }
-
+// Build the 2D color settings (acquisitions + color pixel sampling). Shared by
+// make_settings (for capture) and stored on the camera so get_properties() can
+// compute intrinsics that MATCH the returned 2D color image resolution.
+Zivid::Settings2D make_settings_2d(const Config& config) {
     Zivid::Settings2D::Acquisitions acquisitions_2d;
     for (const auto& a : config.acquisitions_2d) {
         acquisitions_2d.emplaceBack(make_acquisition_2d(a));
@@ -233,10 +231,18 @@ Zivid::Settings make_settings(const Config& config) {
             parse_pixel_sampling<Zivid::Settings2D::Sampling::Pixel::ValueType>(
                 *config.color_pixel_sampling, "color_pixel_sampling")});
     }
+    return settings_2d;
+}
+
+Zivid::Settings make_settings(const Config& config) {
+    Zivid::Settings::Acquisitions acquisitions;
+    for (const auto& a : config.acquisitions) {
+        acquisitions.emplaceBack(make_acquisition(a));
+    }
 
     Zivid::Settings settings{
         acquisitions,
-        Zivid::Settings::Color{settings_2d}};
+        Zivid::Settings::Color{make_settings_2d(config)}};
 
     if (config.pixel_sampling) {
         settings.set(Zivid::Settings::Sampling::Pixel{
@@ -402,6 +408,7 @@ ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app,
     : viam::sdk::Camera(cfg.name()), app_(std::move(app)) {
     const auto config = parse_config(cfg);
     settings_ = make_settings(config);
+    settings_2d_ = make_settings_2d(config);
 
     // On reconfigure, Viam constructs the new instance before destroying the old one.
     // Disconnect any lingering connection to the target camera so connectCamera() succeeds.
@@ -536,7 +543,17 @@ viam::sdk::Camera::point_cloud ZividCamera::get_point_cloud(std::string /*mime_t
 }
 
 viam::sdk::Camera::properties ZividCamera::get_properties() {
-    const auto intrinsics = Zivid::Experimental::Calibration::intrinsics(camera_);
+    // Intrinsics MUST correspond to the 2D color image returned by get_images()
+    // -- the calibration pipeline detects corners in that image and runs PnP
+    // with these intrinsics. The no-argument intrinsics(camera_) returns
+    // full-sensor intrinsics that do NOT account for the 2D color sampling
+    // (resolution / subsampling), so pairing them with the actual color image
+    // yields a wrong principal point and focal length (e.g. half-resolution
+    // intrinsics for a full 2448x2048 image), which silently produces wrong PnP
+    // poses and breaks downstream hand-eye calibration. Estimate intrinsics for
+    // the SAME 2D settings used to capture the color image instead.
+    const auto intrinsics =
+        Zivid::Experimental::Calibration::intrinsics(camera_, settings_2d_);
 
     viam::sdk::Camera::properties props{};
     props.supports_pcd = true;
@@ -547,12 +564,18 @@ viam::sdk::Camera::properties ZividCamera::get_properties() {
     props.intrinsic_parameters.center_x_px = cm.cx().value();
     props.intrinsic_parameters.center_y_px = cm.cy().value();
 
+    // Report the resolution of the 2D COLOR image (what get_images returns),
+    // not the point cloud -- they differ whenever the 3D pixel_sampling and the
+    // 2D color_pixel_sampling are not the same, and the color image is the one
+    // the intrinsics above are paired with.
     {
         std::lock_guard<std::mutex> lock(capture_mutex_);
         if (cached_frame_) {
-            const auto pc = cached_frame_->pointCloud();
-            props.intrinsic_parameters.width_px = static_cast<int>(pc.width());
-            props.intrinsic_parameters.height_px = static_cast<int>(pc.height());
+            if (const auto frame2d = cached_frame_->frame2D()) {
+                const auto color = frame2d->imageRGBA_SRGB();
+                props.intrinsic_parameters.width_px = static_cast<int>(color.width());
+                props.intrinsic_parameters.height_px = static_cast<int>(color.height());
+            }
         }
     }
 
