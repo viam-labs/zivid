@@ -124,8 +124,8 @@ class ZividCamera : public viam::sdk::Camera {
     Zivid::Camera camera_;
     Zivid::Settings settings_;
     // The 2D color settings embedded in settings_, kept separately so
-    // get_properties() can estimate intrinsics for the exact resolution of the
-    // 2D color image returned by get_images().
+    // get_properties() can compute (capture-free) the base intrinsics + base
+    // resolution that are then scaled to the served 2D color image resolution.
     Zivid::Settings2D settings_2d_;
 
     std::mutex capture_mutex_;
