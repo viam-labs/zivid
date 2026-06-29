@@ -543,43 +543,31 @@ viam::sdk::Camera::point_cloud ZividCamera::get_point_cloud(std::string /*mime_t
 }
 
 viam::sdk::Camera::properties ZividCamera::get_properties() {
-    // Intrinsics MUST correspond to the 2D color image returned by get_images()
-    // -- the calibration pipeline detects corners in that image and runs PnP
-    // with these intrinsics. The no-argument intrinsics(camera_) returns
-    // full-sensor intrinsics that do NOT account for the 2D color sampling
-    // (resolution / subsampling), so pairing them with the actual color image
-    // yields a wrong principal point and focal length (e.g. half-resolution
-    // intrinsics for a full 2448x2048 image), which silently produces wrong PnP
-    // poses and breaks downstream hand-eye calibration. Estimate intrinsics for
-    // the SAME 2D settings used to capture the color image instead.
-    const auto intrinsics =
-        Zivid::Experimental::Calibration::intrinsics(camera_, settings_2d_);
+    // The intrinsics MUST correspond to the 2D color image that get_images()
+    const auto info = camera_.info();
+    const auto base = Zivid::Experimental::Calibration::intrinsics(camera_, settings_2d_);
+    const auto base_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_2d_);
+    const auto color_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_);
+
+    const double sx = static_cast<double>(color_res.width()) / base_res.width();
+    const double sy = static_cast<double>(color_res.height()) / base_res.height();
+
+    VIAM_RESOURCE_LOG(debug) << "[get_properties] base_res " << base_res.width() << "x"
+                             << base_res.height() << ", served color_res " << color_res.width()
+                             << "x" << color_res.height() << ", scale " << sx << "x" << sy;
 
     viam::sdk::Camera::properties props{};
     props.supports_pcd = true;
 
-    const auto& cm = intrinsics.cameraMatrix();
-    props.intrinsic_parameters.focal_x_px = cm.fx().value();
-    props.intrinsic_parameters.focal_y_px = cm.fy().value();
-    props.intrinsic_parameters.center_x_px = cm.cx().value();
-    props.intrinsic_parameters.center_y_px = cm.cy().value();
+    const auto& cm = base.cameraMatrix();
+    props.intrinsic_parameters.width_px = static_cast<int>(color_res.width());
+    props.intrinsic_parameters.height_px = static_cast<int>(color_res.height());
+    props.intrinsic_parameters.focal_x_px = cm.fx().value() * sx;
+    props.intrinsic_parameters.focal_y_px = cm.fy().value() * sy;
+    props.intrinsic_parameters.center_x_px = cm.cx().value() * sx;
+    props.intrinsic_parameters.center_y_px = cm.cy().value() * sy;
 
-    // Report the resolution of the 2D COLOR image (what get_images returns),
-    // not the point cloud -- they differ whenever the 3D pixel_sampling and the
-    // 2D color_pixel_sampling are not the same, and the color image is the one
-    // the intrinsics above are paired with.
-    {
-        std::lock_guard<std::mutex> lock(capture_mutex_);
-        if (cached_frame_) {
-            if (const auto frame2d = cached_frame_->frame2D()) {
-                const auto color = frame2d->imageRGBA_SRGB();
-                props.intrinsic_parameters.width_px = static_cast<int>(color.width());
-                props.intrinsic_parameters.height_px = static_cast<int>(color.height());
-            }
-        }
-    }
-
-    const auto& dist = intrinsics.distortion();
+    const auto& dist = base.distortion();
     props.distortion_parameters.model = "brown_conrady";
     props.distortion_parameters.parameters = std::vector<double>{
         dist.k1().value(), dist.k2().value(), dist.p1().value(),
