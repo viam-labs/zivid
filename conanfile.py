@@ -34,7 +34,7 @@ class ViamZivid(ConanFile):
         check_min_cppstd(self, 17)
 
     def requirements(self):
-        self.requires("viam-cpp-sdk/0.33.1")
+        self.requires("viam-cpp-sdk/0.38.1")
         self.requires("stb/cci.20230920")
 
     def layout(self):
