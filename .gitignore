@@ -7,3 +7,4 @@ module.tar.gz
 venv/
 .env
 .venv/
+docs/
