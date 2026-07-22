@@ -19,15 +19,14 @@ Camera component that streams color images, depth maps, and point clouds from a 
   "name": "<name>",
   "attributes": {
     "serial_number": "<serial>",
-    "engine": "omni",
-    "acquisitions": [
-      {"aperture": 5.66, "brightness": 1.8, "exposure_time_us": 10000, "gain": 1.0}
-    ]
+    "engine": "phase"
   }
 }
 ```
 
 **HDR (multiple acquisitions):**
+
+Acquisition ranges vary by camera model. Use [`get_acquisition_ranges`](#get_acquisition_ranges) to discover valid values for your camera — the numbers below are Zivid 2 defaults and will be rejected by Zivid 3 hardware (e.g. XL250 has a fixed f/3.0 aperture).
 
 ```json
 {
@@ -36,7 +35,7 @@ Camera component that streams color images, depth maps, and point clouds from a 
   "name": "<name>",
   "attributes": {
     "serial_number": "<serial>",
-    "engine": "omni",
+    "engine": "phase",
     "acquisitions": [
       {"aperture": 5.66, "brightness": 1.8, "exposure_time_us": 1677,  "gain": 1.0},
       {"aperture": 2.83, "brightness": 1.8, "exposure_time_us": 5000,  "gain": 2.0},
