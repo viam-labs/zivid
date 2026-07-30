@@ -23,7 +23,8 @@ setup:
 	@$(MAKE) --no-print-directory check-sdk
 
 build:
-	test -f ./venv/bin/activate && . ./venv/bin/activate; \
+	@test -f ./venv/bin/activate || $(MAKE) setup
+	. ./venv/bin/activate; \
 	conan install . \
 		--output-folder=$(CONAN_OUTPUT) \
 		--build=missing \
