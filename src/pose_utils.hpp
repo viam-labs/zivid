@@ -115,10 +115,7 @@ inline ViamOV zivid_to_viam_ov(const Zivid::Matrix4x4& mat) {
 
     const double theta_deg = std::atan2(mr10, mr00) * 180.0 / M_PI;
 
-    return {ox, oy, oz_val, theta_deg,
-            static_cast<double>(mat(0, 3)),
-            static_cast<double>(mat(1, 3)),
-            static_cast<double>(mat(2, 3))};
+    return {ox, oy, oz_val, theta_deg, static_cast<double>(mat(0, 3)), static_cast<double>(mat(1, 3)), static_cast<double>(mat(2, 3))};
 }
 
 }  // namespace viam_zivid

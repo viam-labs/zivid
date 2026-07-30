@@ -78,22 +78,18 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg);
 
 class ZividCamera : public viam::sdk::Camera {
    public:
-    ZividCamera(std::shared_ptr<Zivid::Application> app,
-                viam::sdk::Dependencies deps,
-                const viam::sdk::ResourceConfig& cfg);
+    ZividCamera(std::shared_ptr<Zivid::Application> app, viam::sdk::Dependencies deps, const viam::sdk::ResourceConfig& cfg);
 
     ~ZividCamera() override;
 
     viam::sdk::Camera::image_collection get_images(std::vector<std::string> filter_source_names,
                                                    const viam::sdk::ProtoStruct& extra) override;
 
-    viam::sdk::Camera::point_cloud get_point_cloud(std::string mime_type,
-                                                   const viam::sdk::ProtoStruct& extra) override;
+    viam::sdk::Camera::point_cloud get_point_cloud(std::string mime_type, const viam::sdk::ProtoStruct& extra) override;
 
     viam::sdk::Camera::properties get_properties() override;
 
-    std::vector<viam::sdk::GeometryConfig> get_geometries(
-        const viam::sdk::ProtoStruct& extra) override;
+    std::vector<viam::sdk::GeometryConfig> get_geometries(const viam::sdk::ProtoStruct& extra) override;
 
     viam::sdk::ProtoStruct do_command(const viam::sdk::ProtoStruct& command) override;
 

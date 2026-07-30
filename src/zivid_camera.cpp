@@ -9,11 +9,11 @@
 #include <stb_image_write.h>
 
 #include <Zivid/CameraInfo.h>
-#include <Zivid/Experimental/SettingsInfo.h>
-#include <Zivid/NetworkConfiguration.h>
 #include <Zivid/CameraIntrinsics.h>
 #include <Zivid/Experimental/Calibration.h>
+#include <Zivid/Experimental/SettingsInfo.h>
 #include <Zivid/Image.h>
+#include <Zivid/NetworkConfiguration.h>
 #include <Zivid/PointCloud.h>
 #include <Zivid/PointCloudCompositeTypes.h>
 #include <Zivid/Resolution.h>
@@ -40,24 +40,21 @@ constexpr const char* kDepthSourceName = "depth";
 
 // Pack R, G, B into a float for PCD rgb field (PCL convention).
 float pack_rgb(uint8_t r, uint8_t g, uint8_t b) {
-    uint32_t rgb = (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) |
-                   static_cast<uint32_t>(b);
+    uint32_t rgb = (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
     float out{};
     std::memcpy(&out, &rgb, sizeof(float));
     return out;
 }
 
 // Encode an RGBA image as a JPEG byte vector using stb_image_write.
-std::vector<unsigned char> encode_jpeg(const uint8_t* rgba_data, int width, int height,
-                                       int quality = 85) {
+std::vector<unsigned char> encode_jpeg(const uint8_t* rgba_data, int width, int height, int quality = 85) {
     std::vector<unsigned char> buf;
     auto callback = [](void* ctx, void* data, int size) {
         auto* vec = static_cast<std::vector<unsigned char>*>(ctx);
         const auto* bytes = static_cast<unsigned char*>(data);
         vec->insert(vec->end(), bytes, bytes + size);
     };
-    int rc = stbi_write_jpg_to_func(callback, &buf, width, height, 4,
-                                    rgba_data, quality);
+    int rc = stbi_write_jpg_to_func(callback, &buf, width, height, 4, rgba_data, quality);
     if (rc == 0) {
         throw std::runtime_error("JPEG compression failed (stb_image_write)");
     }
@@ -68,8 +65,7 @@ std::vector<unsigned char> encode_jpeg(const uint8_t* rgba_data, int width, int 
 // that treat stored PCD colors as linear (e.g. CloudCompare without sRGB support).
 uint8_t gamma_encode(uint8_t v) {
     const float f = v / 255.f;
-    const float g = (f <= 0.0031308f) ? 12.92f * f
-                                       : 1.055f * std::pow(f, 1.f / 2.4f) - 0.055f;
+    const float g = (f <= 0.0031308f) ? 12.92f * f : 1.055f * std::pow(f, 1.f / 2.4f) - 0.055f;
     return static_cast<uint8_t>(g * 255.f + 0.5f);
 }
 
@@ -78,8 +74,7 @@ uint8_t gamma_encode(uint8_t v) {
 // sRGB gamma encoding so they render correctly in viewers (e.g. CloudCompare) that
 // treat stored values as linear.
 // Only valid (non-NaN) points are included (unorganized layout).
-std::vector<unsigned char> encode_pcd(
-    const Zivid::Array2D<Zivid::PointXYZColorRGBA>& points) {
+std::vector<unsigned char> encode_pcd(const Zivid::Array2D<Zivid::PointXYZColorRGBA>& points) {
     struct PcdPoint {
         float x, y, z, rgb;
     };
@@ -93,10 +88,10 @@ std::vector<unsigned char> encode_pcd(
             continue;
         }
         // Zivid XYZ is in millimetres; convert to metres for PCD convention.
-        valid_points.push_back({p.point.x * 1e-3f, p.point.y * 1e-3f, p.point.z * 1e-3f,
-                                 pack_rgb(gamma_encode(p.color.r),
-                                          gamma_encode(p.color.g),
-                                          gamma_encode(p.color.b))});
+        valid_points.push_back({p.point.x * 1e-3f,
+                                p.point.y * 1e-3f,
+                                p.point.z * 1e-3f,
+                                pack_rgb(gamma_encode(p.color.r), gamma_encode(p.color.g), gamma_encode(p.color.b))});
     }
 
     const size_t n = valid_points.size();
@@ -126,8 +121,7 @@ std::vector<unsigned char> encode_pcd(
 }
 
 // Build a Viam depth map from PointCloud Z values (in mm, stored as uint16).
-viam::sdk::Camera::depth_map build_depth_map(const Zivid::Array2D<Zivid::PointXYZ>& points,
-                                              size_t width, size_t height) {
+viam::sdk::Camera::depth_map build_depth_map(const Zivid::Array2D<Zivid::PointXYZ>& points, size_t width, size_t height) {
     viam::sdk::Camera::depth_map dm = viam::sdk::Camera::depth_map::from_shape({height, width});
     for (size_t row = 0; row < height; ++row) {
         for (size_t col = 0; col < width; ++col) {
@@ -145,7 +139,8 @@ viam::sdk::Camera::depth_map build_depth_map(const Zivid::Array2D<Zivid::PointXY
 template <typename T>
 std::optional<T> attr(const viam::sdk::ProtoStruct& attrs, const std::string& key) {
     auto it = attrs.find(key);
-    if (it == attrs.end()) return std::nullopt;
+    if (it == attrs.end())
+        return std::nullopt;
     return it->second.get_unchecked<T>();
 }
 
@@ -154,19 +149,16 @@ Zivid::Settings::Acquisition make_acquisition(const AcquisitionConfig& a) {
     if (a.aperture)
         acq.set(Zivid::Settings::Acquisition::Aperture{*a.aperture});
     if (a.brightness) {
-        const auto max_brightness =
-            Zivid::Settings::Acquisition::Brightness::validRange().max();
+        const auto max_brightness = Zivid::Settings::Acquisition::Brightness::validRange().max();
         const double clamped = std::min(*a.brightness, max_brightness);
         if (clamped != *a.brightness) {
-            std::cerr << "[ZividCamera] brightness " << *a.brightness
-                      << " exceeds 3D max " << max_brightness
-                      << ", clamping to " << clamped << "\n";
+            std::cerr << "[ZividCamera] brightness " << *a.brightness << " exceeds 3D max " << max_brightness << ", clamping to " << clamped
+                      << "\n";
         }
         acq.set(Zivid::Settings::Acquisition::Brightness{clamped});
     }
     if (a.exposure_time_us)
-        acq.set(Zivid::Settings::Acquisition::ExposureTime{
-            std::chrono::microseconds{static_cast<int64_t>(*a.exposure_time_us)}});
+        acq.set(Zivid::Settings::Acquisition::ExposureTime{std::chrono::microseconds{static_cast<int64_t>(*a.exposure_time_us)}});
     if (a.gain)
         acq.set(Zivid::Settings::Acquisition::Gain{*a.gain});
     return acq;
@@ -177,19 +169,16 @@ Zivid::Settings2D::Acquisition make_acquisition_2d(const AcquisitionConfig& a) {
     if (a.aperture)
         acq.set(Zivid::Settings2D::Acquisition::Aperture{*a.aperture});
     if (a.brightness) {
-        const auto max_brightness =
-            Zivid::Settings2D::Acquisition::Brightness::validRange().max();
+        const auto max_brightness = Zivid::Settings2D::Acquisition::Brightness::validRange().max();
         const double clamped = std::min(*a.brightness, max_brightness);
         if (clamped != *a.brightness) {
-            std::cerr << "[ZividCamera] brightness " << *a.brightness
-                      << " exceeds 2D max " << max_brightness
-                      << ", clamping to " << clamped << "\n";
+            std::cerr << "[ZividCamera] brightness " << *a.brightness << " exceeds 2D max " << max_brightness << ", clamping to " << clamped
+                      << "\n";
         }
         acq.set(Zivid::Settings2D::Acquisition::Brightness{clamped});
     }
     if (a.exposure_time_us)
-        acq.set(Zivid::Settings2D::Acquisition::ExposureTime{
-            std::chrono::microseconds{static_cast<int64_t>(*a.exposure_time_us)}});
+        acq.set(Zivid::Settings2D::Acquisition::ExposureTime{std::chrono::microseconds{static_cast<int64_t>(*a.exposure_time_us)}});
     if (a.gain)
         acq.set(Zivid::Settings2D::Acquisition::Gain{*a.gain});
     return acq;
@@ -200,17 +189,23 @@ Zivid::Settings2D::Acquisition make_acquisition_2d(const AcquisitionConfig& a) {
 // enums share the same member names, so this templates over the ValueType.
 template <typename ValueType>
 ValueType parse_pixel_sampling(const std::string& s, const char* what) {
-    if (s == "all") return ValueType::all;
-    if (s == "by2x2") return ValueType::by2x2;
-    if (s == "by4x4") return ValueType::by4x4;
-    if (s == "blueSubsample2x2") return ValueType::blueSubsample2x2;
-    if (s == "blueSubsample4x4") return ValueType::blueSubsample4x4;
-    if (s == "redSubsample2x2") return ValueType::redSubsample2x2;
-    if (s == "redSubsample4x4") return ValueType::redSubsample4x4;
-    throw std::invalid_argument(
-        std::string(what) + " '" + s +
-        "' is invalid. Valid values: all, by2x2, by4x4, blueSubsample2x2, "
-        "blueSubsample4x4, redSubsample2x2, redSubsample4x4.");
+    if (s == "all")
+        return ValueType::all;
+    if (s == "by2x2")
+        return ValueType::by2x2;
+    if (s == "by4x4")
+        return ValueType::by4x4;
+    if (s == "blueSubsample2x2")
+        return ValueType::blueSubsample2x2;
+    if (s == "blueSubsample4x4")
+        return ValueType::blueSubsample4x4;
+    if (s == "redSubsample2x2")
+        return ValueType::redSubsample2x2;
+    if (s == "redSubsample4x4")
+        return ValueType::redSubsample4x4;
+    throw std::invalid_argument(std::string(what) + " '" + s +
+                                "' is invalid. Valid values: all, by2x2, by4x4, blueSubsample2x2, "
+                                "blueSubsample4x4, redSubsample2x2, redSubsample4x4.");
 }
 
 // Build the 2D color settings (acquisitions + color pixel sampling). Shared by
@@ -228,8 +223,7 @@ Zivid::Settings2D make_settings_2d(const Config& config) {
     Zivid::Settings2D settings_2d{acquisitions_2d};
     if (config.color_pixel_sampling) {
         settings_2d.set(Zivid::Settings2D::Sampling::Pixel{
-            parse_pixel_sampling<Zivid::Settings2D::Sampling::Pixel::ValueType>(
-                *config.color_pixel_sampling, "color_pixel_sampling")});
+            parse_pixel_sampling<Zivid::Settings2D::Sampling::Pixel::ValueType>(*config.color_pixel_sampling, "color_pixel_sampling")});
     }
     return settings_2d;
 }
@@ -240,14 +234,11 @@ Zivid::Settings make_settings(const Config& config) {
         acquisitions.emplaceBack(make_acquisition(a));
     }
 
-    Zivid::Settings settings{
-        acquisitions,
-        Zivid::Settings::Color{make_settings_2d(config)}};
+    Zivid::Settings settings{acquisitions, Zivid::Settings::Color{make_settings_2d(config)}};
 
     if (config.pixel_sampling) {
         settings.set(Zivid::Settings::Sampling::Pixel{
-            parse_pixel_sampling<Zivid::Settings::Sampling::Pixel::ValueType>(
-                *config.pixel_sampling, "pixel_sampling")});
+            parse_pixel_sampling<Zivid::Settings::Sampling::Pixel::ValueType>(*config.pixel_sampling, "pixel_sampling")});
     }
 
     if (config.engine) {
@@ -261,36 +252,26 @@ Zivid::Settings make_settings(const Config& config) {
         else if (e == "sage")
             settings.set(Zivid::Settings::Engine{Zivid::Settings::Engine::ValueType::sage});
         else
-            throw std::invalid_argument("Unknown Zivid engine '" + e +
-                                        "'. Valid values: phase, stripe, omni, sage.");
+            throw std::invalid_argument("Unknown Zivid engine '" + e + "'. Valid values: phase, stripe, omni, sage.");
     }
 
     if (config.depth_roi) {
         const auto& d = *config.depth_roi;
-        settings.set(Zivid::Settings::RegionOfInterest{
-            Zivid::Settings::RegionOfInterest::Depth{
-                Zivid::Settings::RegionOfInterest::Depth::Enabled{true},
-                Zivid::Settings::RegionOfInterest::Depth::Range{d.min, d.max}}});
+        settings.set(Zivid::Settings::RegionOfInterest{Zivid::Settings::RegionOfInterest::Depth{
+            Zivid::Settings::RegionOfInterest::Depth::Enabled{true}, Zivid::Settings::RegionOfInterest::Depth::Range{d.min, d.max}}});
     }
 
     if (config.box_roi) {
         const auto& b = *config.box_roi;
-        settings.set(Zivid::Settings::RegionOfInterest{
-            Zivid::Settings::RegionOfInterest::Box{
-                Zivid::Settings::RegionOfInterest::Box::Enabled{true},
-                Zivid::Settings::RegionOfInterest::Box::PointO{
-                    static_cast<float>(b.point_o.x),
-                    static_cast<float>(b.point_o.y),
-                    static_cast<float>(b.point_o.z)},
-                Zivid::Settings::RegionOfInterest::Box::PointA{
-                    static_cast<float>(b.point_a.x),
-                    static_cast<float>(b.point_a.y),
-                    static_cast<float>(b.point_a.z)},
-                Zivid::Settings::RegionOfInterest::Box::PointB{
-                    static_cast<float>(b.point_b.x),
-                    static_cast<float>(b.point_b.y),
-                    static_cast<float>(b.point_b.z)},
-                Zivid::Settings::RegionOfInterest::Box::Extents{b.extents_min, b.extents_max}}});
+        settings.set(Zivid::Settings::RegionOfInterest{Zivid::Settings::RegionOfInterest::Box{
+            Zivid::Settings::RegionOfInterest::Box::Enabled{true},
+            Zivid::Settings::RegionOfInterest::Box::PointO{
+                static_cast<float>(b.point_o.x), static_cast<float>(b.point_o.y), static_cast<float>(b.point_o.z)},
+            Zivid::Settings::RegionOfInterest::Box::PointA{
+                static_cast<float>(b.point_a.x), static_cast<float>(b.point_a.y), static_cast<float>(b.point_a.z)},
+            Zivid::Settings::RegionOfInterest::Box::PointB{
+                static_cast<float>(b.point_b.x), static_cast<float>(b.point_b.y), static_cast<float>(b.point_b.z)},
+            Zivid::Settings::RegionOfInterest::Box::Extents{b.extents_min, b.extents_max}}});
     }
 
     if (config.processing && config.processing->noise_removal) {
@@ -302,9 +283,8 @@ Zivid::Settings make_settings(const Config& config) {
             const auto range = NoiseRemoval::Threshold::validRange();
             const double clamped = std::min(std::max(*nr.threshold, range.min()), range.max());
             if (clamped != *nr.threshold) {
-                std::cerr << "[ZividCamera] noise removal threshold " << *nr.threshold
-                          << " outside valid range [" << range.min() << ", " << range.max()
-                          << "], clamping to " << clamped << "\n";
+                std::cerr << "[ZividCamera] noise removal threshold " << *nr.threshold << " outside valid range [" << range.min() << ", "
+                          << range.max() << "], clamping to " << clamped << "\n";
             }
             settings.set(NoiseRemoval::Threshold{clamped});
         }
@@ -318,9 +298,9 @@ Zivid::Settings make_settings(const Config& config) {
 Config parse_config(const viam::sdk::ResourceConfig& cfg) {
     Config result;
     const auto& attrs = cfg.attributes();
-    result.serial_number        = attr<std::string>(attrs, "serial_number");
-    result.engine               = attr<std::string>(attrs, "engine");
-    result.pixel_sampling       = attr<std::string>(attrs, "pixel_sampling");
+    result.serial_number = attr<std::string>(attrs, "serial_number");
+    result.engine = attr<std::string>(attrs, "engine");
+    result.pixel_sampling = attr<std::string>(attrs, "pixel_sampling");
     result.color_pixel_sampling = attr<std::string>(attrs, "color_pixel_sampling");
 
     auto parse_acquisitions = [&](const std::string& key) {
@@ -330,17 +310,17 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
             for (const auto& item : it->second.get_unchecked<viam::sdk::ProtoList>()) {
                 const auto& a = item.get_unchecked<viam::sdk::ProtoStruct>();
                 AcquisitionConfig acq;
-                acq.aperture         = attr<double>(a, "aperture");
-                acq.brightness       = attr<double>(a, "brightness");
+                acq.aperture = attr<double>(a, "aperture");
+                acq.brightness = attr<double>(a, "brightness");
                 acq.exposure_time_us = attr<double>(a, "exposure_time_us");
-                acq.gain             = attr<double>(a, "gain");
+                acq.gain = attr<double>(a, "gain");
                 out.push_back(acq);
             }
         }
         return out;
     };
 
-    result.acquisitions    = parse_acquisitions("acquisitions");
+    result.acquisitions = parse_acquisitions("acquisitions");
     result.acquisitions_2d = parse_acquisitions("acquisitions_2d");
     if (result.acquisitions_2d.empty())
         result.acquisitions_2d = parse_acquisitions("acquisitions_2D");
@@ -357,9 +337,7 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
         auto depth_it = roi.find("depth");
         if (depth_it != roi.end()) {
             const auto& d = depth_it->second.get_unchecked<viam::sdk::ProtoStruct>();
-            result.depth_roi = DepthRoiConfig{
-                attr<double>(d, "min").value_or(0.0),
-                attr<double>(d, "max").value_or(0.0)};
+            result.depth_roi = DepthRoiConfig{attr<double>(d, "min").value_or(0.0), attr<double>(d, "max").value_or(0.0)};
         }
 
         auto box_it = roi.find("box");
@@ -368,18 +346,15 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
 
             auto parse_point = [&](const std::string& key) -> Point3D {
                 const auto& p = b.at(key).get_unchecked<viam::sdk::ProtoStruct>();
-                return {attr<double>(p, "x").value_or(0.0),
-                        attr<double>(p, "y").value_or(0.0),
-                        attr<double>(p, "z").value_or(0.0)};
+                return {attr<double>(p, "x").value_or(0.0), attr<double>(p, "y").value_or(0.0), attr<double>(p, "z").value_or(0.0)};
             };
 
             const auto& extents = b.at("extents").get_unchecked<viam::sdk::ProtoStruct>();
-            result.box_roi = BoxRoiConfig{
-                parse_point("point_o"),
-                parse_point("point_a"),
-                parse_point("point_b"),
-                attr<double>(extents, "min").value_or(0.0),
-                attr<double>(extents, "max").value_or(0.0)};
+            result.box_roi = BoxRoiConfig{parse_point("point_o"),
+                                          parse_point("point_a"),
+                                          parse_point("point_b"),
+                                          attr<double>(extents, "min").value_or(0.0),
+                                          attr<double>(extents, "max").value_or(0.0)};
         }
     }
 
@@ -391,9 +366,7 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
         auto nr_it = proc.find("noise_removal");
         if (nr_it != proc.end()) {
             const auto& nr = nr_it->second.get_unchecked<viam::sdk::ProtoStruct>();
-            pc.noise_removal = NoiseRemovalConfig{
-                attr<bool>(nr, "enabled"),
-                attr<double>(nr, "threshold")};
+            pc.noise_removal = NoiseRemovalConfig{attr<bool>(nr, "enabled"), attr<double>(nr, "threshold")};
         }
 
         result.processing = pc;
@@ -402,9 +375,7 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
     return result;
 }
 
-ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app,
-                         viam::sdk::Dependencies /*deps*/,
-                         const viam::sdk::ResourceConfig& cfg)
+ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app, viam::sdk::Dependencies /*deps*/, const viam::sdk::ResourceConfig& cfg)
     : viam::sdk::Camera(cfg.name()), app_(std::move(app)) {
     const auto config = parse_config(cfg);
     settings_ = make_settings(config);
@@ -413,19 +384,19 @@ ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app,
     // On reconfigure, Viam constructs the new instance before destroying the old one.
     // Disconnect any lingering connection to the target camera so connectCamera() succeeds.
     for (auto& cam : app_->cameras()) {
-        const bool matches = config.serial_number
-            ? cam.info().serialNumber().value() == *config.serial_number
-            : cam.state().status().value() ==
-                  Zivid::CameraState::Status::ValueType::connected;
+        const bool matches = config.serial_number ? cam.info().serialNumber().value() == *config.serial_number
+                                                  : cam.state().status().value() == Zivid::CameraState::Status::ValueType::connected;
         if (matches) {
-            try { cam.disconnect(); } catch (...) {}
+            try {
+                cam.disconnect();
+            } catch (...) {
+            }
             break;
         }
     }
 
     if (config.serial_number) {
-        camera_ = app_->connectCamera(
-            Zivid::CameraInfo::SerialNumber{*config.serial_number});
+        camera_ = app_->connectCamera(Zivid::CameraInfo::SerialNumber{*config.serial_number});
     } else {
         camera_ = app_->connectCamera();
     }
@@ -467,9 +438,7 @@ Zivid::Frame ZividCamera::get_or_capture() {
     VIAM_RESOURCE_LOG(info) << "capture begin";
     const auto capture_start = std::chrono::steady_clock::now();
     Zivid::Frame frame = camera_.capture2D3D(settings_);
-    const auto capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::steady_clock::now() - capture_start)
-                                .count();
+    const auto capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - capture_start).count();
     VIAM_RESOURCE_LOG(info) << "capture end (" << capture_ms << " ms)";
 
     lock.lock();
@@ -482,16 +451,14 @@ Zivid::Frame ZividCamera::get_or_capture() {
     return *cached_frame_;
 }
 
-viam::sdk::Camera::image_collection ZividCamera::get_images(
-    std::vector<std::string> filter_source_names, const viam::sdk::ProtoStruct& /*extra*/) {
+viam::sdk::Camera::image_collection ZividCamera::get_images(std::vector<std::string> filter_source_names,
+                                                            const viam::sdk::ProtoStruct& /*extra*/) {
     const bool want_color =
         filter_source_names.empty() ||
-        std::find(filter_source_names.begin(), filter_source_names.end(), kColorSourceName) !=
-            filter_source_names.end();
+        std::find(filter_source_names.begin(), filter_source_names.end(), kColorSourceName) != filter_source_names.end();
     const bool want_depth =
         filter_source_names.empty() ||
-        std::find(filter_source_names.begin(), filter_source_names.end(), kDepthSourceName) !=
-            filter_source_names.end();
+        std::find(filter_source_names.begin(), filter_source_names.end(), kDepthSourceName) != filter_source_names.end();
 
     auto frame = get_or_capture();
 
@@ -530,8 +497,7 @@ viam::sdk::Camera::image_collection ZividCamera::get_images(
     return result;
 }
 
-viam::sdk::Camera::point_cloud ZividCamera::get_point_cloud(std::string /*mime_type*/,
-                                                             const viam::sdk::ProtoStruct& /*extra*/) {
+viam::sdk::Camera::point_cloud ZividCamera::get_point_cloud(std::string /*mime_type*/, const viam::sdk::ProtoStruct& /*extra*/) {
     auto frame = get_or_capture();
     const auto pc = frame.pointCloud();
     const auto points = pc.copyPointsXYZColorsRGBA();
@@ -552,9 +518,8 @@ viam::sdk::Camera::properties ZividCamera::get_properties() {
     const double sx = static_cast<double>(color_res.width()) / base_res.width();
     const double sy = static_cast<double>(color_res.height()) / base_res.height();
 
-    VIAM_RESOURCE_LOG(debug) << "[get_properties] base_res " << base_res.width() << "x"
-                             << base_res.height() << ", served color_res " << color_res.width()
-                             << "x" << color_res.height() << ", scale " << sx << "x" << sy;
+    VIAM_RESOURCE_LOG(debug) << "[get_properties] base_res " << base_res.width() << "x" << base_res.height() << ", served color_res "
+                             << color_res.width() << "x" << color_res.height() << ", scale " << sx << "x" << sy;
 
     viam::sdk::Camera::properties props{};
     props.supports_pcd = true;
@@ -569,9 +534,8 @@ viam::sdk::Camera::properties ZividCamera::get_properties() {
 
     const auto& dist = base.distortion();
     props.distortion_parameters.model = "brown_conrady";
-    props.distortion_parameters.parameters = std::vector<double>{
-        dist.k1().value(), dist.k2().value(), dist.p1().value(),
-        dist.p2().value(), dist.k3().value()};
+    props.distortion_parameters.parameters =
+        std::vector<double>{dist.k1().value(), dist.k2().value(), dist.p1().value(), dist.p2().value(), dist.k3().value()};
 
     props.mime_types = {"image/jpeg", "image/vnd.viam.dep"};
     props.frame_rate = 0.f;  // on-demand capture; no fixed frame rate
@@ -579,8 +543,7 @@ viam::sdk::Camera::properties ZividCamera::get_properties() {
     return props;
 }
 
-std::vector<viam::sdk::GeometryConfig> ZividCamera::get_geometries(
-    const viam::sdk::ProtoStruct& /*extra*/) {
+std::vector<viam::sdk::GeometryConfig> ZividCamera::get_geometries(const viam::sdk::ProtoStruct& /*extra*/) {
     return {};
 }
 
@@ -606,35 +569,33 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         // 3D acquisition ranges
         viam::sdk::ProtoStruct acq3d;
         {
-            auto aperture   = SI::validRange<Zivid::Settings::Acquisition::Aperture>(info);
+            auto aperture = SI::validRange<Zivid::Settings::Acquisition::Aperture>(info);
             auto brightness = SI::validRange<Zivid::Settings::Acquisition::Brightness>(info);
-            auto exposure   = SI::validRange<Zivid::Settings::Acquisition::ExposureTime>(info);
-            auto gain       = SI::validRange<Zivid::Settings::Acquisition::Gain>(info);
-            acq3d["aperture"]         = make_range_struct(aperture.min(), aperture.max());
-            acq3d["brightness"]       = make_range_struct(brightness.min(), brightness.max());
-            acq3d["exposure_time_us"] = make_range_struct(
-                static_cast<double>(exposure.min().count()),
-                static_cast<double>(exposure.max().count()));
+            auto exposure = SI::validRange<Zivid::Settings::Acquisition::ExposureTime>(info);
+            auto gain = SI::validRange<Zivid::Settings::Acquisition::Gain>(info);
+            acq3d["aperture"] = make_range_struct(aperture.min(), aperture.max());
+            acq3d["brightness"] = make_range_struct(brightness.min(), brightness.max());
+            acq3d["exposure_time_us"] =
+                make_range_struct(static_cast<double>(exposure.min().count()), static_cast<double>(exposure.max().count()));
             acq3d["gain"] = make_range_struct(gain.min(), gain.max());
         }
 
         // 2D acquisition ranges
         viam::sdk::ProtoStruct acq2d;
         {
-            auto aperture   = SI::validRange<Zivid::Settings2D::Acquisition::Aperture>(info);
+            auto aperture = SI::validRange<Zivid::Settings2D::Acquisition::Aperture>(info);
             auto brightness = SI::validRange<Zivid::Settings2D::Acquisition::Brightness>(info);
-            auto exposure   = SI::validRange<Zivid::Settings2D::Acquisition::ExposureTime>(info);
-            auto gain       = SI::validRange<Zivid::Settings2D::Acquisition::Gain>(info);
-            acq2d["aperture"]         = make_range_struct(aperture.min(), aperture.max());
-            acq2d["brightness"]       = make_range_struct(brightness.min(), brightness.max());
-            acq2d["exposure_time_us"] = make_range_struct(
-                static_cast<double>(exposure.min().count()),
-                static_cast<double>(exposure.max().count()));
+            auto exposure = SI::validRange<Zivid::Settings2D::Acquisition::ExposureTime>(info);
+            auto gain = SI::validRange<Zivid::Settings2D::Acquisition::Gain>(info);
+            acq2d["aperture"] = make_range_struct(aperture.min(), aperture.max());
+            acq2d["brightness"] = make_range_struct(brightness.min(), brightness.max());
+            acq2d["exposure_time_us"] =
+                make_range_struct(static_cast<double>(exposure.min().count()), static_cast<double>(exposure.max().count()));
             acq2d["gain"] = make_range_struct(gain.min(), gain.max());
         }
 
         viam::sdk::ProtoStruct result;
-        result["acquisitions"]    = viam::sdk::ProtoValue{std::move(acq3d)};
+        result["acquisitions"] = viam::sdk::ProtoValue{std::move(acq3d)};
         result["acquisitions_2d"] = viam::sdk::ProtoValue{std::move(acq2d)};
         return result;
     }
@@ -644,8 +605,8 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         const auto& ipv4 = net.ipv4();
 
         viam::sdk::ProtoStruct ipv4_struct;
-        ipv4_struct["mode"]        = ipv4.mode().toString();
-        ipv4_struct["address"]     = ipv4.address().value();
+        ipv4_struct["mode"] = ipv4.mode().toString();
+        ipv4_struct["address"] = ipv4.address().value();
         ipv4_struct["subnet_mask"] = ipv4.subnetMask().value();
 
         viam::sdk::ProtoStruct result;
@@ -659,12 +620,9 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         if (path_it != command.end()) {
             path = path_it->second.get_unchecked<std::string>();
         } else {
-            const auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::system_clock::now().time_since_epoch())
-                                .count();
-            path = "/var/lib/viam/zivid_diagnostic_" +
-                   camera_.info().serialNumber().value() + "_" +
-                   std::to_string(ts) + ".zdf";
+            const auto ts =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            path = "/var/lib/viam/zivid_diagnostic_" + camera_.info().serialNumber().value() + "_" + std::to_string(ts) + ".zdf";
         }
 
         Zivid::Settings diag_settings = settings_;
@@ -700,14 +658,14 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         const auto state = camera_.state();
 
         viam::sdk::ProtoStruct temp;
-        temp["dmd"]     = state.temperature().dmd().value();
+        temp["dmd"] = state.temperature().dmd().value();
         temp["general"] = state.temperature().general().value();
-        temp["led"]     = state.temperature().led().value();
-        temp["lens"]    = state.temperature().lens().value();
-        temp["pcb"]     = state.temperature().pcb().value();
+        temp["led"] = state.temperature().led().value();
+        temp["lens"] = state.temperature().lens().value();
+        temp["pcb"] = state.temperature().pcb().value();
 
         viam::sdk::ProtoStruct result;
-        result["status"]      = state.status().toString();
+        result["status"] = state.status().toString();
         result["temperature"] = viam::sdk::ProtoValue{std::move(temp)};
 
         if (state.inaccessibleReason().hasValue()) {

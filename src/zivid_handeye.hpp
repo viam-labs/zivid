@@ -22,8 +22,7 @@ class ZividCamera;
 
 class ZividHandEyeCalibration : public viam::sdk::GenericService {
    public:
-    ZividHandEyeCalibration(viam::sdk::Dependencies deps,
-                             const viam::sdk::ResourceConfig& cfg);
+    ZividHandEyeCalibration(viam::sdk::Dependencies deps, const viam::sdk::ResourceConfig& cfg);
 
     viam::sdk::ProtoStruct do_command(const viam::sdk::ProtoStruct& command) override;
     viam::sdk::ProtoStruct get_status() override;
@@ -32,7 +31,7 @@ class ZividHandEyeCalibration : public viam::sdk::GenericService {
     struct SessionInput {
         Zivid::Matrix4x4 robot_pose;
         std::optional<Zivid::Calibration::HandEyeInput> input;  // always set; optional avoids default-ctor requirement
-        std::string detection_mode;  // "calibration_board" | "markers"
+        std::string detection_mode;                             // "calibration_board" | "markers"
         std::optional<Zivid::PointXYZ> centroid;
         std::optional<std::vector<int>> detected_marker_ids;
     };

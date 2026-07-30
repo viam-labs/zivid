@@ -14,8 +14,7 @@ ZividDiscovery::ZividDiscovery(std::shared_ptr<Zivid::Application> app,
                                const viam::sdk::ResourceConfig& cfg)
     : viam::sdk::Discovery(cfg.name()), app_(std::move(app)) {}
 
-std::vector<viam::sdk::ResourceConfig> ZividDiscovery::discover_resources(
-    const viam::sdk::ProtoStruct& /*extra*/) {
+std::vector<viam::sdk::ResourceConfig> ZividDiscovery::discover_resources(const viam::sdk::ProtoStruct& /*extra*/) {
     std::vector<viam::sdk::ResourceConfig> configs;
 
     std::vector<Zivid::Camera> cameras;
@@ -38,8 +37,7 @@ std::vector<viam::sdk::ResourceConfig> ZividDiscovery::discover_resources(
             // Only surface cameras that can actually be connected to.
             if (status != Zivid::CameraState::Status::ValueType::available &&
                 status != Zivid::CameraState::Status::ValueType::firmwareUpdateRequired) {
-                VIAM_RESOURCE_LOG(info) << "skipping " << serial
-                                        << " (status: " << state.status().toString() << ")";
+                VIAM_RESOURCE_LOG(info) << "skipping " << serial << " (status: " << state.status().toString() << ")";
                 continue;
             }
 
@@ -54,12 +52,7 @@ std::vector<viam::sdk::ResourceConfig> ZividDiscovery::discover_resources(
             const std::string name = "zivid-" + serial;
 
             configs.push_back(viam::sdk::ResourceConfig{
-                "camera",
-                name,
-                "rdk",
-                std::move(attrs),
-                "rdk:component:camera",
-                viam::sdk::Model{"viam", "camera", "zivid"}});
+                "camera", name, "rdk", std::move(attrs), "rdk:component:camera", viam::sdk::Model{"viam", "camera", "zivid"}});
 
             VIAM_RESOURCE_LOG(info) << "found " << model_name << " S/N " << serial;
         } catch (const std::exception& e) {

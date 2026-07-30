@@ -32,9 +32,12 @@ std::string json_escape(const std::string& s) {
     std::string out;
     out.reserve(s.size());
     for (char c : s) {
-        if (c == '"') out += "\\\"";
-        else if (c == '\\') out += "\\\\";
-        else out += c;
+        if (c == '"')
+            out += "\\\"";
+        else if (c == '\\')
+            out += "\\\\";
+        else
+            out += c;
     }
     return out;
 }
@@ -60,7 +63,8 @@ std::string matrix4x4_to_json_array(const Zivid::Matrix4x4& mat) {
     ss << "[";
     for (size_t row = 0; row < 4; ++row) {
         for (size_t col = 0; col < 4; ++col) {
-            if (row > 0 || col > 0) ss << ",";
+            if (row > 0 || col > 0)
+                ss << ",";
             ss << static_cast<double>(mat(row, col));
         }
     }
@@ -77,8 +81,7 @@ struct ResidualStats {
     double translation_mean, translation_max, translation_std;
 };
 
-ResidualStats compute_residual_stats(
-    const std::vector<Zivid::Calibration::HandEyeResidual>& residuals) {
+ResidualStats compute_residual_stats(const std::vector<Zivid::Calibration::HandEyeResidual>& residuals) {
     const size_t n = residuals.size();
 
     std::vector<double> rots(n), trans(n);
@@ -87,26 +90,24 @@ ResidualStats compute_residual_stats(
         trans[i] = static_cast<double>(residuals[i].translation());
     }
 
-    auto mean_of = [](const std::vector<double>& v) {
-        return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
-    };
-    auto max_of = [](const std::vector<double>& v) {
-        return *std::max_element(v.begin(), v.end());
-    };
+    auto mean_of = [](const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); };
+    auto max_of = [](const std::vector<double>& v) { return *std::max_element(v.begin(), v.end()); };
     auto std_of = [&mean_of](const std::vector<double>& v) {
         const double m = mean_of(v);
         double sq_sum = 0.0;
-        for (double x : v) sq_sum += (x - m) * (x - m);
+        for (double x : v)
+            sq_sum += (x - m) * (x - m);
         return std::sqrt(sq_sum / static_cast<double>(v.size()));
     };
 
-    return {mean_of(rots), max_of(rots), std_of(rots),
-            mean_of(trans), max_of(trans), std_of(trans)};
+    return {mean_of(rots), max_of(rots), std_of(rots), mean_of(trans), max_of(trans), std_of(trans)};
 }
 
 std::string quality_label(const ResidualStats& s) {
-    if (s.rotation_mean < 1.0 && s.translation_mean < 1.0) return "good";
-    if (s.rotation_mean < 2.0 && s.translation_mean < 3.0) return "acceptable";
+    if (s.rotation_mean < 1.0 && s.translation_mean < 1.0)
+        return "good";
+    if (s.rotation_mean < 2.0 && s.translation_mean < 3.0)
+        return "acceptable";
     return "poor";
 }
 
@@ -116,8 +117,7 @@ std::string quality_label(const ResidualStats& s) {
 // Constructor
 // ---------------------------------------------------------------------------
 
-ZividHandEyeCalibration::ZividHandEyeCalibration(viam::sdk::Dependencies deps,
-                                                  const viam::sdk::ResourceConfig& cfg)
+ZividHandEyeCalibration::ZividHandEyeCalibration(viam::sdk::Dependencies deps, const viam::sdk::ResourceConfig& cfg)
     : viam::sdk::GenericService(cfg.name()) {
     const auto& attrs = cfg.attributes();
 
@@ -135,21 +135,18 @@ ZividHandEyeCalibration::ZividHandEyeCalibration(viam::sdk::Dependencies deps,
     save_dir_ = (dir_it != attrs.end()) ? dir_it->second.get_unchecked<std::string>() : "/var/lib/viam";
 
     auto dict_it = attrs.find("marker_dictionary");
-    marker_dictionary_name_ =
-        (dict_it != attrs.end()) ? dict_it->second.get_unchecked<std::string>() : "aruco4x4_50";
+    marker_dictionary_name_ = (dict_it != attrs.end()) ? dict_it->second.get_unchecked<std::string>() : "aruco4x4_50";
 
     // Wire up arm dependency.
     const auto arm_dep_name = viam::sdk::Name{viam::sdk::API::get<viam::sdk::Arm>(), "", arm_name_};
     auto arm_it = deps.find(arm_dep_name);
     if (arm_it == deps.end()) {
-        throw std::invalid_argument(
-            "ZividHandEyeCalibration: arm '" + arm_name_ +
-            "' not found in dependencies — add it to the service's 'depends_on' list");
+        throw std::invalid_argument("ZividHandEyeCalibration: arm '" + arm_name_ +
+                                    "' not found in dependencies — add it to the service's 'depends_on' list");
     }
     arm_ = std::dynamic_pointer_cast<viam::sdk::Arm>(arm_it->second);
     if (!arm_) {
-        throw std::runtime_error("ZividHandEyeCalibration: dependency '" + arm_name_ +
-                                 "' is not an Arm component");
+        throw std::runtime_error("ZividHandEyeCalibration: dependency '" + arm_name_ + "' is not an Arm component");
     }
 
     // Wire up camera dependency.
@@ -158,8 +155,8 @@ ZividHandEyeCalibration::ZividHandEyeCalibration(viam::sdk::Dependencies deps,
     // that ZividCamera populates on construction instead.
     zivid_camera_ = ZividCamera::find(camera_name);
     if (!zivid_camera_) {
-        throw std::runtime_error("ZividHandEyeCalibration: no ZividCamera named '" +
-                                 camera_name + "' found in registry — ensure it is listed "
+        throw std::runtime_error("ZividHandEyeCalibration: no ZividCamera named '" + camera_name +
+                                 "' found in registry — ensure it is listed "
                                  "in depends_on and has finished initialising");
     }
     camera_serial_ = zivid_camera_->serial_number();
@@ -169,16 +166,19 @@ ZividHandEyeCalibration::ZividHandEyeCalibration(viam::sdk::Dependencies deps,
 // do_command dispatcher
 // ---------------------------------------------------------------------------
 
-viam::sdk::ProtoStruct ZividHandEyeCalibration::do_command(
-    const viam::sdk::ProtoStruct& command) {
+viam::sdk::ProtoStruct ZividHandEyeCalibration::do_command(const viam::sdk::ProtoStruct& command) {
     auto it = command.find("command");
-    if (it == command.end()) return {};
+    if (it == command.end())
+        return {};
 
     const auto& cmd = it->second.get_unchecked<std::string>();
 
-    if (cmd == "capture_and_detect") return cmd_capture_and_detect(command);
-    if (cmd == "calibrate_eye_in_hand") return cmd_calibrate_eye_in_hand();
-    if (cmd == "reset_calibration") return cmd_reset_calibration();
+    if (cmd == "capture_and_detect")
+        return cmd_capture_and_detect(command);
+    if (cmd == "calibrate_eye_in_hand")
+        return cmd_calibrate_eye_in_hand();
+    if (cmd == "reset_calibration")
+        return cmd_reset_calibration();
 
     throw std::invalid_argument("ZividHandEyeCalibration: unknown command '" + cmd +
                                 "'. Valid: capture_and_detect, calibrate_eye_in_hand, "
@@ -189,8 +189,7 @@ viam::sdk::ProtoStruct ZividHandEyeCalibration::do_command(
 // capture_and_detect
 // ---------------------------------------------------------------------------
 
-viam::sdk::ProtoStruct ZividHandEyeCalibration::cmd_capture_and_detect(
-    const viam::sdk::ProtoStruct& args) {
+viam::sdk::ProtoStruct ZividHandEyeCalibration::cmd_capture_and_detect(const viam::sdk::ProtoStruct& args) {
     // Detection mode.
     std::string detection_mode = "calibration_board";
     auto mode_it = args.find("detection_mode");
@@ -198,8 +197,7 @@ viam::sdk::ProtoStruct ZividHandEyeCalibration::cmd_capture_and_detect(
         detection_mode = mode_it->second.get_unchecked<std::string>();
     }
     if (detection_mode != "calibration_board" && detection_mode != "markers") {
-        throw std::invalid_argument(
-            "detection_mode must be 'calibration_board' or 'markers'");
+        throw std::invalid_argument("detection_mode must be 'calibration_board' or 'markers'");
     }
 
     // Read arm end-effector pose and convert to Zivid Matrix4x4.
@@ -210,15 +208,11 @@ viam::sdk::ProtoStruct ZividHandEyeCalibration::cmd_capture_and_detect(
     {
         std::ostringstream oss;
         oss << std::fixed << std::setprecision(4);
-        oss << "arm pose: x=" << viam_pose.coordinates.x
-            << " y=" << viam_pose.coordinates.y
-            << " z=" << viam_pose.coordinates.z
-            << " ox=" << viam_pose.orientation.o_x
-            << " oy=" << viam_pose.orientation.o_y
-            << " oz=" << viam_pose.orientation.o_z
-            << " theta=" << viam_pose.theta
-            << " | R col2: [" << robot_pose(0,2) << ", " << robot_pose(1,2) << ", " << robot_pose(2,2) << "]"
-            << " t: [" << robot_pose(0,3) << ", " << robot_pose(1,3) << ", " << robot_pose(2,3) << "]";
+        oss << "arm pose: x=" << viam_pose.coordinates.x << " y=" << viam_pose.coordinates.y << " z=" << viam_pose.coordinates.z
+            << " ox=" << viam_pose.orientation.o_x << " oy=" << viam_pose.orientation.o_y << " oz=" << viam_pose.orientation.o_z
+            << " theta=" << viam_pose.theta << " | R col2: [" << robot_pose(0, 2) << ", " << robot_pose(1, 2) << ", " << robot_pose(2, 2)
+            << "]"
+            << " t: [" << robot_pose(0, 3) << ", " << robot_pose(1, 3) << ", " << robot_pose(2, 3) << "]";
         VIAM_RESOURCE_LOG(info) << oss.str();
     }
 
@@ -266,8 +260,7 @@ viam::sdk::ProtoStruct ZividHandEyeCalibration::cmd_capture_and_detect(
             }
         }
         if (marker_ids.empty()) {
-            throw std::invalid_argument(
-                "capture_and_detect with detection_mode='markers' requires 'marker_ids' list");
+            throw std::invalid_argument("capture_and_detect with detection_mode='markers' requires 'marker_ids' list");
         }
 
         const auto dict = Zivid::Calibration::MarkerDictionary::fromString(marker_dictionary_name_);
@@ -318,8 +311,7 @@ viam::sdk::ProtoStruct ZividHandEyeCalibration::cmd_calibrate_eye_in_hand() {
     }
 
     if (snapshot.empty()) {
-        throw std::runtime_error(
-            "calibrate_eye_in_hand: no captured poses. Run capture_and_detect first.");
+        throw std::runtime_error("calibrate_eye_in_hand: no captured poses. Run capture_and_detect first.");
     }
 
     for (const auto& s : snapshot) {
@@ -434,8 +426,7 @@ viam::sdk::ProtoStruct ZividHandEyeCalibration::get_status() {
 // save_to_file
 // ---------------------------------------------------------------------------
 
-std::string ZividHandEyeCalibration::save_to_file(
-    const Zivid::Calibration::HandEyeOutput& calibration_result) const {
+std::string ZividHandEyeCalibration::save_to_file(const Zivid::Calibration::HandEyeOutput& calibration_result) const {
     const std::string ts = timestamp_for_filename();
     const std::string path = save_dir_ + "/zivid_handeye_" + ts + ".json";
 
@@ -459,19 +450,21 @@ std::string ZividHandEyeCalibration::save_to_file(
         json << "      \"detection_mode\": \"" << json_escape(s.detection_mode) << "\",\n";
         json << "      \"detected\": true";
         if (s.centroid) {
-            json << ",\n      \"centroid\": {\"x\": " << s.centroid->x
-                 << ", \"y\": " << s.centroid->y << ", \"z\": " << s.centroid->z << "}";
+            json << ",\n      \"centroid\": {\"x\": " << s.centroid->x << ", \"y\": " << s.centroid->y << ", \"z\": " << s.centroid->z
+                 << "}";
         }
         if (s.detected_marker_ids) {
             json << ",\n      \"detected_marker_ids\": [";
             for (size_t j = 0; j < s.detected_marker_ids->size(); ++j) {
-                if (j > 0) json << ", ";
+                if (j > 0)
+                    json << ", ";
                 json << (*s.detected_marker_ids)[j];
             }
             json << "]";
         }
         json << "\n    }";
-        if (i + 1 < session_inputs_.size()) json << ",";
+        if (i + 1 < session_inputs_.size())
+            json << ",";
         json << "\n";
     }
 
@@ -481,9 +474,9 @@ std::string ZividHandEyeCalibration::save_to_file(
     json << "    \"transform\": " << matrix4x4_to_json_array(transform) << ",\n";
     json << "    \"residuals\": [\n";
     for (size_t i = 0; i < residuals.size(); ++i) {
-        json << "      {\"rotation_deg\": " << residuals[i].rotation()
-             << ", \"translation_mm\": " << residuals[i].translation() << "}";
-        if (i + 1 < residuals.size()) json << ",";
+        json << "      {\"rotation_deg\": " << residuals[i].rotation() << ", \"translation_mm\": " << residuals[i].translation() << "}";
+        if (i + 1 < residuals.size())
+            json << ",";
         json << "\n";
     }
     json << "    ],\n";
@@ -502,8 +495,7 @@ std::string ZividHandEyeCalibration::save_to_file(
 
     std::ofstream file(path);
     if (!file) {
-        throw std::runtime_error("ZividHandEyeCalibration: failed to open '" + path +
-                                 "' for writing");
+        throw std::runtime_error("ZividHandEyeCalibration: failed to open '" + path + "' for writing");
     }
     file << json.str();
 
