@@ -14,12 +14,9 @@ namespace viam_zivid {
 
 class ZividDiscovery : public viam::sdk::Discovery {
    public:
-    ZividDiscovery(std::shared_ptr<Zivid::Application> app,
-                   viam::sdk::Dependencies deps,
-                   const viam::sdk::ResourceConfig& cfg);
+    ZividDiscovery(std::shared_ptr<Zivid::Application> app, viam::sdk::Dependencies deps, const viam::sdk::ResourceConfig& cfg);
 
-    std::vector<viam::sdk::ResourceConfig> discover_resources(
-        const viam::sdk::ProtoStruct& extra) override;
+    std::vector<viam::sdk::ResourceConfig> discover_resources(const viam::sdk::ProtoStruct& extra) override;
 
     viam::sdk::ProtoStruct do_command(const viam::sdk::ProtoStruct& command) override;
 

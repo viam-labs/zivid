@@ -6,9 +6,16 @@ BINARY := viam-camera-zivid
 
 export CONAN_FLAGS := -s:a build_type=Release -s:a compiler.cppstd=17
 
-.PHONY: setup build conan-build module.tar.gz clean check-sdk
+.PHONY: setup build conan-build module.tar.gz clean check-sdk lint
 
 default: build
+
+lint:
+ifeq ($(OS),Windows_NT)
+	@echo lint unsupported on windows
+else
+	./bin/run-clang-format.sh
+endif
 
 check-sdk:
 	@echo "Checking Zivid SDK..."

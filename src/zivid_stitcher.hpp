@@ -19,7 +19,7 @@ namespace viam_zivid {
 class ZividCamera;
 
 struct ScanPose {
-    double x, y, z;           // mm
+    double x, y, z;            // mm
     double ox, oy, oz, theta;  // OV orientation (degrees)
 };
 
@@ -38,10 +38,8 @@ class ZividStitcher : public viam::sdk::GenericService {
 
     // Captures one frame, transforms to base frame, and returns the cloud.
     Zivid::UnorganizedPointCloud capture_transformed_cloud();
-    void save_cloud_to_ply(const Zivid::UnorganizedPointCloud& cloud,
-                           const std::string& path) const;
-    void save_cloud_to_pcd(const Zivid::UnorganizedPointCloud& cloud,
-                           const std::string& path) const;
+    void save_cloud_to_ply(const Zivid::UnorganizedPointCloud& cloud, const std::string& path) const;
+    void save_cloud_to_pcd(const Zivid::UnorganizedPointCloud& cloud, const std::string& path) const;
 
     std::shared_ptr<viam::sdk::Arm> arm_;
     std::string camera_name_;  // looked up lazily via ZividCamera::find() at capture time
