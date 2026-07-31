@@ -486,7 +486,18 @@ Response: `{"cleared_count": <n>}`.
 
 ## Linux runtime prerequisites
 
-The Zivid SDK uses OpenCL for point-cloud reconstruction, HDR merging, and ROI filtering. On a fresh Linux machine OpenCL is not installed by default and the module will fail to capture frames until the runtime is set up.
+The Zivid SDK uses OpenCL for point-cloud reconstruction, HDR merging, and ROI filtering, and initialises it in the SDK constructor. On a fresh Linux machine no OpenCL vendor driver is installed, and the module aborts at startup before `viam:zivid:camera` can register:
+
+```
+terminate called after throwing an instance of 'Zivid::Exceptions::ReturnCode<int>'
+  what():  An OpenCL error occurred: Failed to get platforms
+Make sure the OpenCL driver is installed and working ('clinfo' needs to show at least one platform).
+[CL_PLATFORM_NOT_FOUND_KHR]
+```
+
+The module's `first_run` hook handles steps 1 and 2 below automatically on Ubuntu and Debian hosts: `first_run.sh` calls `install-opencl-icd.sh`, which detects the GPU on the PCI bus, installs the matching vendor package, and verifies the result with `clinfo` when it is available. It is idempotent — an already registered driver is left alone — and non-fatal, so a machine it cannot work out is left to the operator with a warning in the module logs rather than a module that refuses to start.
+
+Work through the steps by hand when that warning appears, when `clinfo` reports no platform, or when setting up a machine outside the supported distributions. Step 3 is never automated: it needs a reboot to take effect.
 
 ### 1. Install the OpenCL ICD loader
 
@@ -494,6 +505,8 @@ The Zivid SDK uses OpenCL for point-cloud reconstruction, HDR merging, and ROI f
 sudo apt-get update
 sudo apt-get install -y ocl-icd-libopencl1 clinfo
 ```
+
+This is not sufficient on its own. `ocl-icd-libopencl1` is the ICD *loader*, a dispatch shim that finds real drivers through `/etc/OpenCL/vendors/*.icd`, and `clinfo` is a diagnostic tool. Neither one is a driver — step 2 is what makes OpenCL work.
 
 ### 2. Install a vendor ICD for your hardware
 
@@ -512,7 +525,7 @@ sudo apt-get install -y intel-opencl-icd
 
 ### 3. Grant the `viam` user GPU access
 
-`viam-agent` runs as the `viam` user, which must be in the `render` and `video` groups to access `/dev/dri/*`:
+Only needed where `viam-agent` runs as the `viam` user rather than as root. That user must be in the `render` and `video` groups to access `/dev/dri/*`:
 
 ```bash
 sudo usermod -aG render,video viam
@@ -524,12 +537,20 @@ A reboot (or at minimum a restart of `viam-agent`) is required for the new group
 ### 4. Verify
 
 ```bash
-clinfo | head -20
+clinfo -l                 # should list at least one platform and device
 ls /etc/OpenCL/vendors/   # should list the vendor ICD installed above
 ls -l /dev/dri/           # render/card nodes should exist
 ```
 
 `clinfo` should report at least one OpenCL platform and one device. If it prints `Number of platforms: 0`, the vendor ICD is missing or not registered under `/etc/OpenCL/vendors/`.
+
+If `intel-opencl-icd` is installed and registered but `clinfo` still reports no platform, check which kernel driver owns the GPU:
+
+```bash
+ls -l /sys/class/drm/card*/device/driver
+```
+
+Ubuntu 24.04's `intel-opencl-icd` (23.43) enumerates zero devices on GPUs bound to the newer `xe` driver; it works on `i915`. Intel's PPA (`ppa:kobuk-team/intel-graphics`) carries a build that handles `xe`. See [intel/compute-runtime#903](https://github.com/intel/compute-runtime/issues/903). The first-run hook does not add that PPA — adding third-party apt sources is an operator decision.
 
 ---
 

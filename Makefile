@@ -45,7 +45,7 @@ build:
 	@echo "Binary: $(BIN_DIR)/$(BINARY)"
 	@echo "Creating module.tar.gz..."
 	tar czf module.tar.gz \
-		-C $(BIN_DIR) $(BINARY) install-zivid-sdk.sh \
+		-C $(BIN_DIR) $(BINARY) install-zivid-sdk.sh install-opencl-icd.sh \
 		-C $(shell pwd) meta.json first_run.sh
 	@echo "Created module.tar.gz"
 
