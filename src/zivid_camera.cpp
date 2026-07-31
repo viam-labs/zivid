@@ -136,52 +136,236 @@ viam::sdk::Camera::depth_map build_depth_map(const Zivid::Array2D<Zivid::PointXY
     return dm;
 }
 
+// Human-readable JSON type name for a config value, so errors can quote the type the operator
+// actually wrote rather than an SDK enumerator.
+const char* kind_name(viam::sdk::ProtoValue::Kind kind) {
+    switch (kind) {
+        case viam::sdk::ProtoValue::k_null:
+            return "null";
+        case viam::sdk::ProtoValue::k_bool:
+            return "bool";
+        case viam::sdk::ProtoValue::k_double:
+            return "number";
+        case viam::sdk::ProtoValue::k_string:
+            return "string";
+        case viam::sdk::ProtoValue::k_list:
+            return "list";
+        case viam::sdk::ProtoValue::k_struct:
+            return "object";
+    }
+    return "unknown";
+}
+
+// JSON type name expected of each type a config value can be read as.
 template <typename T>
-std::optional<T> attr(const viam::sdk::ProtoStruct& attrs, const std::string& key) {
-    auto it = attrs.find(key);
-    if (it == attrs.end())
-        return std::nullopt;
-    return it->second.get_unchecked<T>();
+struct json_type;
+
+template <>
+struct json_type<bool> {
+    static constexpr const char* name = "bool";
+};
+
+template <>
+struct json_type<double> {
+    static constexpr const char* name = "number";
+};
+
+template <>
+struct json_type<std::string> {
+    static constexpr const char* name = "string";
+};
+
+template <>
+struct json_type<viam::sdk::ProtoList> {
+    static constexpr const char* name = "list";
+};
+
+template <>
+struct json_type<viam::sdk::ProtoStruct> {
+    static constexpr const char* name = "object";
+};
+
+// Noun phrase identifying a config attribute by its full dotted path in error messages.
+std::string attr_desc(const std::string& path) {
+    return "config attribute '" + path + "'";
 }
 
-Zivid::Settings::Acquisition make_acquisition(const AcquisitionConfig& a) {
-    Zivid::Settings::Acquisition acq;
-    if (a.aperture)
-        acq.set(Zivid::Settings::Acquisition::Aperture{*a.aperture});
-    if (a.brightness) {
-        const auto max_brightness = Zivid::Settings::Acquisition::Brightness::validRange().max();
-        const double clamped = std::min(*a.brightness, max_brightness);
-        if (clamped != *a.brightness) {
-            std::cerr << "[ZividCamera] brightness " << *a.brightness << " exceeds 3D max " << max_brightness << ", clamping to " << clamped
-                      << "\n";
-        }
-        acq.set(Zivid::Settings::Acquisition::Brightness{clamped});
+// Reads `value` as T, throwing an error naming `what` (a noun phrase identifying the value,
+// e.g. "config attribute 'roi.box.point_o.x'"), the expected type and the type written.
+//
+// ProtoValue::get<T>() returns nullptr on a type mismatch, whereas get_unchecked<T>()
+// reinterprets the stored bytes: reading a string as a double that way is undefined behaviour,
+// i.e. a module crash with no diagnostic, which is exactly what a mistyped config must not do.
+template <typename T>
+const T& typed_value(const viam::sdk::ProtoValue& value, const std::string& what) {
+    if (const T* typed = value.get<T>()) {
+        return *typed;
     }
-    if (a.exposure_time_us)
-        acq.set(Zivid::Settings::Acquisition::ExposureTime{std::chrono::microseconds{static_cast<int64_t>(*a.exposure_time_us)}});
-    if (a.gain)
-        acq.set(Zivid::Settings::Acquisition::Gain{*a.gain});
+    throw std::invalid_argument(what + " must be of type " + json_type<T>::name + ", but is of type " + kind_name(value.kind()) + ".");
+}
+
+// A config object together with its dotted path ("" at the top level), so that every accessor
+// can report the full attribute path — e.g. "roi.box.point_o.x" — without each call site having
+// to restate where it sits in the config tree.
+class ConfigObject {
+   public:
+    ConfigObject(const viam::sdk::ProtoStruct& fields, std::string path) : fields_(&fields), path_(std::move(path)) {}
+
+    // Dotted config path of member `key`.
+    std::string child_path(const std::string& key) const {
+        return path_.empty() ? key : path_ + "." + key;
+    }
+
+    // Member `key` read as T, or nullopt when the key is absent.
+    template <typename T>
+    std::optional<T> get(const std::string& key) const {
+        const auto it = fields_->find(key);
+        if (it == fields_->end()) {
+            return std::nullopt;
+        }
+        return typed_value<T>(it->second, attr_desc(child_path(key)));
+    }
+
+    // Member `key` as a nested object, or nullopt when the key is absent.
+    std::optional<ConfigObject> object(const std::string& key) const {
+        const auto it = fields_->find(key);
+        if (it == fields_->end()) {
+            return std::nullopt;
+        }
+        return ConfigObject{typed_value<viam::sdk::ProtoStruct>(it->second, attr_desc(child_path(key))), child_path(key)};
+    }
+
+    // Member `key` as a nested object, naming this block when the key is absent.
+    ConfigObject required_object(const std::string& key) const {
+        auto child = object(key);
+        if (!child) {
+            throw std::invalid_argument((path_.empty() ? std::string{"the module config"} : attr_desc(path_)) +
+                                        " is missing required key '" + key + "'.");
+        }
+        return *child;
+    }
+
+    // Member `key` as a list, or nullptr when the key is absent.
+    const viam::sdk::ProtoList* list(const std::string& key) const {
+        const auto it = fields_->find(key);
+        if (it == fields_->end()) {
+            return nullptr;
+        }
+        return &typed_value<viam::sdk::ProtoList>(it->second, attr_desc(child_path(key)));
+    }
+
+   private:
+    const viam::sdk::ProtoStruct* fields_;
+    std::string path_;
+};
+
+// Zivid expresses each setting's valid range in that setting's own ValueType; normalize to
+// double so one bounds check covers f-numbers, gains and microsecond durations alike.
+double range_bound(double value) {
+    return value;
+}
+
+double range_bound(std::chrono::microseconds value) {
+    return static_cast<double>(value.count());
+}
+
+// Rejects an out-of-range value, naming the attribute, the value, the accepted range and whose
+// range it is (`source`).
+void require_in_range(double value, double min, double max, const std::string& path, const std::string& source) {
+    if (value >= min && value <= max) {
+        return;
+    }
+    std::ostringstream msg;
+    msg << attr_desc(path) << " is " << value << ", outside the range [" << min << ", " << max << "] accepted by " << source
+        << ". Use the get_acquisition_ranges DoCommand to discover the ranges this camera accepts.";
+    throw std::invalid_argument(msg.str());
+}
+
+// Validates a config value against the setting's model-independent range and returns it.
+// Zivid's own out-of-range exception does not say which config attribute produced the value, so
+// check it here, where the attribute path is still known.
+template <typename Setting>
+double checked_value(double value, const std::string& path) {
+    const auto range = Setting::validRange();
+    require_in_range(value, range_bound(range.min()), range_bound(range.max()), path, "the Zivid SDK");
+    return value;
+}
+
+// checked_value for a duration-valued setting, taking and validating microseconds.
+template <typename Setting>
+std::chrono::microseconds checked_duration(double value_us, const std::string& path) {
+    return std::chrono::microseconds{static_cast<int64_t>(checked_value<Setting>(value_us, path))};
+}
+
+// Builds a Zivid acquisition from config. Templated over the acquisition type because the 3D
+// (Zivid::Settings::Acquisition) and 2D (Zivid::Settings2D::Acquisition) variants share member
+// names but are distinct types with different valid ranges — a difference that has to be
+// validated per variant rather than assumed away. `path` is the acquisition's config path,
+// e.g. "acquisitions[0]".
+template <typename Acquisition>
+Acquisition make_acquisition(const AcquisitionConfig& a, const std::string& path) {
+    using Aperture = typename Acquisition::Aperture;
+    using Brightness = typename Acquisition::Brightness;
+    using ExposureTime = typename Acquisition::ExposureTime;
+    using Gain = typename Acquisition::Gain;
+
+    Acquisition acq;
+    if (a.aperture) {
+        acq.set(Aperture{checked_value<Aperture>(*a.aperture, path + ".aperture")});
+    }
+    if (a.brightness) {
+        acq.set(Brightness{checked_value<Brightness>(*a.brightness, path + ".brightness")});
+    }
+    if (a.exposure_time_us) {
+        acq.set(ExposureTime{checked_duration<ExposureTime>(*a.exposure_time_us, path + ".exposure_time_us")});
+    }
+    if (a.gain) {
+        acq.set(Gain{checked_value<Gain>(*a.gain, path + ".gain")});
+    }
     return acq;
 }
 
-Zivid::Settings2D::Acquisition make_acquisition_2d(const AcquisitionConfig& a) {
-    Zivid::Settings2D::Acquisition acq;
-    if (a.aperture)
-        acq.set(Zivid::Settings2D::Acquisition::Aperture{*a.aperture});
-    if (a.brightness) {
-        const auto max_brightness = Zivid::Settings2D::Acquisition::Brightness::validRange().max();
-        const double clamped = std::min(*a.brightness, max_brightness);
-        if (clamped != *a.brightness) {
-            std::cerr << "[ZividCamera] brightness " << *a.brightness << " exceeds 2D max " << max_brightness << ", clamping to " << clamped
-                      << "\n";
-        }
-        acq.set(Zivid::Settings2D::Acquisition::Brightness{clamped});
+// Validates a config value against the range the *connected* camera reports. The ranges checked
+// while building settings are the SDK's model-independent ones — the union over every Zivid
+// model — so a value can pass those and still be rejected by this particular camera (e.g. the
+// XL250 has a fixed f/3.0 aperture). Checking after connect turns that into a config error
+// naming the model, instead of a Zivid exception raised much later at capture time.
+template <typename Setting>
+void check_against_camera(const std::optional<double>& value,
+                          const Zivid::CameraInfo& info,
+                          const std::string& path,
+                          const std::string& camera) {
+    if (!value) {
+        return;
     }
-    if (a.exposure_time_us)
-        acq.set(Zivid::Settings2D::Acquisition::ExposureTime{std::chrono::microseconds{static_cast<int64_t>(*a.exposure_time_us)}});
-    if (a.gain)
-        acq.set(Zivid::Settings2D::Acquisition::Gain{*a.gain});
-    return acq;
+    const auto range = Zivid::Experimental::SettingsInfo::validRange<Setting>(info);
+    require_in_range(*value, range_bound(range.min()), range_bound(range.max()), path, camera);
+}
+
+template <typename Acquisition>
+void check_acquisitions_against_camera(const std::vector<AcquisitionConfig>& acquisitions,
+                                       const Zivid::CameraInfo& info,
+                                       const std::string& key,
+                                       const std::string& camera) {
+    for (size_t i = 0; i < acquisitions.size(); ++i) {
+        const auto& a = acquisitions[i];
+        const std::string path = key + "[" + std::to_string(i) + "]";
+        check_against_camera<typename Acquisition::Aperture>(a.aperture, info, path + ".aperture", camera);
+        check_against_camera<typename Acquisition::Brightness>(a.brightness, info, path + ".brightness", camera);
+        check_against_camera<typename Acquisition::ExposureTime>(a.exposure_time_us, info, path + ".exposure_time_us", camera);
+        check_against_camera<typename Acquisition::Gain>(a.gain, info, path + ".gain", camera);
+    }
+}
+
+// Identifies a camera in operator-facing messages, e.g. "Zivid 2+ LR110 (serial 26179B29)".
+// Best effort: it only ever decorates another message, so it must not raise one of its own.
+std::string describe_camera(const Zivid::Camera& camera) {
+    try {
+        const auto info = camera.info();
+        return info.modelName().value() + " (serial " + info.serialNumber().value() + ")";
+    } catch (...) {
+        return "the Zivid camera (model and serial unavailable)";
+    }
 }
 
 // Maps a config string to a Zivid pixel-sampling value. Both the 3D
@@ -213,8 +397,9 @@ ValueType parse_pixel_sampling(const std::string& s, const char* what) {
 // compute intrinsics that MATCH the returned 2D color image resolution.
 Zivid::Settings2D make_settings_2d(const Config& config) {
     Zivid::Settings2D::Acquisitions acquisitions_2d;
-    for (const auto& a : config.acquisitions_2d) {
-        acquisitions_2d.emplaceBack(make_acquisition_2d(a));
+    for (size_t i = 0; i < config.acquisitions_2d.size(); ++i) {
+        acquisitions_2d.emplaceBack(
+            make_acquisition<Zivid::Settings2D::Acquisition>(config.acquisitions_2d[i], "acquisitions_2d[" + std::to_string(i) + "]"));
     }
     if (acquisitions_2d.isEmpty()) {
         acquisitions_2d.emplaceBack(Zivid::Settings2D::Acquisition{});
@@ -230,8 +415,9 @@ Zivid::Settings2D make_settings_2d(const Config& config) {
 
 Zivid::Settings make_settings(const Config& config) {
     Zivid::Settings::Acquisitions acquisitions;
-    for (const auto& a : config.acquisitions) {
-        acquisitions.emplaceBack(make_acquisition(a));
+    for (size_t i = 0; i < config.acquisitions.size(); ++i) {
+        acquisitions.emplaceBack(
+            make_acquisition<Zivid::Settings::Acquisition>(config.acquisitions[i], "acquisitions[" + std::to_string(i) + "]"));
     }
 
     Zivid::Settings settings{acquisitions, Zivid::Settings::Color{make_settings_2d(config)}};
@@ -279,15 +465,9 @@ Zivid::Settings make_settings(const Config& config) {
         using NoiseRemoval = Zivid::Settings::Processing::Filters::Noise::Removal;
         if (nr.enabled)
             settings.set(NoiseRemoval::Enabled{*nr.enabled});
-        if (nr.threshold) {
-            const auto range = NoiseRemoval::Threshold::validRange();
-            const double clamped = std::min(std::max(*nr.threshold, range.min()), range.max());
-            if (clamped != *nr.threshold) {
-                std::cerr << "[ZividCamera] noise removal threshold " << *nr.threshold << " outside valid range [" << range.min() << ", "
-                          << range.max() << "], clamping to " << clamped << "\n";
-            }
-            settings.set(NoiseRemoval::Threshold{clamped});
-        }
+        if (nr.threshold)
+            settings.set(
+                NoiseRemoval::Threshold{checked_value<NoiseRemoval::Threshold>(*nr.threshold, "processing.noise_removal.threshold")});
     }
 
     return settings;
@@ -297,25 +477,28 @@ Zivid::Settings make_settings(const Config& config) {
 
 Config parse_config(const viam::sdk::ResourceConfig& cfg) {
     Config result;
-    const auto& attrs = cfg.attributes();
-    result.serial_number = attr<std::string>(attrs, "serial_number");
-    result.engine = attr<std::string>(attrs, "engine");
-    result.pixel_sampling = attr<std::string>(attrs, "pixel_sampling");
-    result.color_pixel_sampling = attr<std::string>(attrs, "color_pixel_sampling");
+    const ConfigObject root{cfg.attributes(), ""};
+
+    result.serial_number = root.get<std::string>("serial_number");
+    result.engine = root.get<std::string>("engine");
+    result.pixel_sampling = root.get<std::string>("pixel_sampling");
+    result.color_pixel_sampling = root.get<std::string>("color_pixel_sampling");
 
     auto parse_acquisitions = [&](const std::string& key) {
         std::vector<AcquisitionConfig> out;
-        auto it = attrs.find(key);
-        if (it != attrs.end()) {
-            for (const auto& item : it->second.get_unchecked<viam::sdk::ProtoList>()) {
-                const auto& a = item.get_unchecked<viam::sdk::ProtoStruct>();
-                AcquisitionConfig acq;
-                acq.aperture = attr<double>(a, "aperture");
-                acq.brightness = attr<double>(a, "brightness");
-                acq.exposure_time_us = attr<double>(a, "exposure_time_us");
-                acq.gain = attr<double>(a, "gain");
-                out.push_back(acq);
-            }
+        const viam::sdk::ProtoList* items = root.list(key);
+        if (items == nullptr) {
+            return out;
+        }
+        for (size_t i = 0; i < items->size(); ++i) {
+            const std::string item_path = key + "[" + std::to_string(i) + "]";
+            const ConfigObject a{typed_value<viam::sdk::ProtoStruct>((*items)[i], attr_desc(item_path)), item_path};
+            AcquisitionConfig acq;
+            acq.aperture = a.get<double>("aperture");
+            acq.brightness = a.get<double>("brightness");
+            acq.exposure_time_us = a.get<double>("exposure_time_us");
+            acq.gain = a.get<double>("gain");
+            out.push_back(acq);
         }
         return out;
     };
@@ -330,43 +513,31 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
         result.acquisitions.push_back(AcquisitionConfig{});
     }
 
-    auto roi_it = attrs.find("roi");
-    if (roi_it != attrs.end()) {
-        const auto& roi = roi_it->second.get_unchecked<viam::sdk::ProtoStruct>();
-
-        auto depth_it = roi.find("depth");
-        if (depth_it != roi.end()) {
-            const auto& d = depth_it->second.get_unchecked<viam::sdk::ProtoStruct>();
-            result.depth_roi = DepthRoiConfig{attr<double>(d, "min").value_or(0.0), attr<double>(d, "max").value_or(0.0)};
+    if (const auto roi = root.object("roi")) {
+        if (const auto depth = roi->object("depth")) {
+            result.depth_roi = DepthRoiConfig{depth->get<double>("min").value_or(0.0), depth->get<double>("max").value_or(0.0)};
         }
 
-        auto box_it = roi.find("box");
-        if (box_it != roi.end()) {
-            const auto& b = box_it->second.get_unchecked<viam::sdk::ProtoStruct>();
-
+        if (const auto box = roi->object("box")) {
             auto parse_point = [&](const std::string& key) -> Point3D {
-                const auto& p = b.at(key).get_unchecked<viam::sdk::ProtoStruct>();
-                return {attr<double>(p, "x").value_or(0.0), attr<double>(p, "y").value_or(0.0), attr<double>(p, "z").value_or(0.0)};
+                const ConfigObject p = box->required_object(key);
+                return {p.get<double>("x").value_or(0.0), p.get<double>("y").value_or(0.0), p.get<double>("z").value_or(0.0)};
             };
 
-            const auto& extents = b.at("extents").get_unchecked<viam::sdk::ProtoStruct>();
+            const ConfigObject extents = box->required_object("extents");
             result.box_roi = BoxRoiConfig{parse_point("point_o"),
                                           parse_point("point_a"),
                                           parse_point("point_b"),
-                                          attr<double>(extents, "min").value_or(0.0),
-                                          attr<double>(extents, "max").value_or(0.0)};
+                                          extents.get<double>("min").value_or(0.0),
+                                          extents.get<double>("max").value_or(0.0)};
         }
     }
 
-    auto proc_it = attrs.find("processing");
-    if (proc_it != attrs.end()) {
-        const auto& proc = proc_it->second.get_unchecked<viam::sdk::ProtoStruct>();
+    if (const auto proc = root.object("processing")) {
         ProcessingConfig pc;
 
-        auto nr_it = proc.find("noise_removal");
-        if (nr_it != proc.end()) {
-            const auto& nr = nr_it->second.get_unchecked<viam::sdk::ProtoStruct>();
-            pc.noise_removal = NoiseRemovalConfig{attr<bool>(nr, "enabled"), attr<double>(nr, "threshold")};
+        if (const auto nr = proc->object("noise_removal")) {
+            pc.noise_removal = NoiseRemovalConfig{nr->get<bool>("enabled"), nr->get<double>("threshold")};
         }
 
         result.processing = pc;
@@ -395,11 +566,24 @@ ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app, viam::sdk::Dep
         }
     }
 
-    if (config.serial_number) {
-        camera_ = app_->connectCamera(Zivid::CameraInfo::SerialNumber{*config.serial_number});
-    } else {
-        camera_ = app_->connectCamera();
+    const std::string target =
+        config.serial_number ? "Zivid camera " + *config.serial_number : std::string{"the first available Zivid camera"};
+    try {
+        if (config.serial_number) {
+            camera_ = app_->connectCamera(Zivid::CameraInfo::SerialNumber{*config.serial_number});
+        } else {
+            camera_ = app_->connectCamera();
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error("failed to connect to " + target + ": " + e.what());
     }
+
+    const std::string camera_desc = describe_camera(camera_);
+    VIAM_RESOURCE_LOG(info) << "connected to " << camera_desc;
+
+    const auto cam_info = camera_.info();
+    check_acquisitions_against_camera<Zivid::Settings::Acquisition>(config.acquisitions, cam_info, "acquisitions", camera_desc);
+    check_acquisitions_against_camera<Zivid::Settings2D::Acquisition>(config.acquisitions_2d, cam_info, "acquisitions_2d", camera_desc);
 
     std::lock_guard<std::mutex> lk(registry_mutex_);
     registry_[cfg.name()] = this;
@@ -428,6 +612,11 @@ Zivid::Frame ZividCamera::get_or_capture() {
     // Another thread is already capturing — wait for it to finish and reuse its frame.
     if (capturing_) {
         capture_cv_.wait(lock, [this] { return !capturing_; });
+        // The owning thread clears capturing_ on failure too, in which case there is no frame
+        // to hand back and dereferencing the empty optional would be undefined behaviour.
+        if (!cached_frame_) {
+            throw std::runtime_error("capture failed on another thread; see the preceding error");
+        }
         return *cached_frame_;
     }
 
@@ -437,7 +626,17 @@ Zivid::Frame ZividCamera::get_or_capture() {
 
     VIAM_RESOURCE_LOG(info) << "capture begin";
     const auto capture_start = std::chrono::steady_clock::now();
-    Zivid::Frame frame = camera_.capture2D3D(settings_);
+    std::optional<Zivid::Frame> frame;
+    try {
+        frame = camera_.capture2D3D(settings_);
+    } catch (const std::exception& e) {
+        // Leaving capturing_ set would wedge every later capture on the condition variable.
+        lock.lock();
+        capturing_ = false;
+        lock.unlock();
+        capture_cv_.notify_all();
+        throw std::runtime_error(describe_camera(camera_) + " rejected the configured capture settings: " + e.what());
+    }
     const auto capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - capture_start).count();
     VIAM_RESOURCE_LOG(info) << "capture end (" << capture_ms << " ms)";
 
@@ -509,38 +708,52 @@ viam::sdk::Camera::point_cloud ZividCamera::get_point_cloud(std::string /*mime_t
 }
 
 viam::sdk::Camera::properties ZividCamera::get_properties() {
-    // The intrinsics MUST correspond to the 2D color image that get_images()
-    const auto info = camera_.info();
-    const auto base = Zivid::Experimental::Calibration::intrinsics(camera_, settings_2d_);
-    const auto base_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_2d_);
-    const auto color_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_);
+    // The intrinsics MUST correspond to the 2D color image that get_images() serves, so they
+    // are derived from the same 2D settings the capture uses.
+    //
+    // This is also the first point at which the config-derived 2D settings are checked against
+    // the connected camera model, so a value this model does not support surfaces here rather
+    // than while parsing.
+    try {
+        const auto info = camera_.info();
+        const auto base = Zivid::Experimental::Calibration::intrinsics(camera_, settings_2d_);
+        const auto base_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_2d_);
+        const auto color_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_);
 
-    const double sx = static_cast<double>(color_res.width()) / base_res.width();
-    const double sy = static_cast<double>(color_res.height()) / base_res.height();
+        const double sx = static_cast<double>(color_res.width()) / base_res.width();
+        const double sy = static_cast<double>(color_res.height()) / base_res.height();
 
-    VIAM_RESOURCE_LOG(debug) << "[get_properties] base_res " << base_res.width() << "x" << base_res.height() << ", served color_res "
-                             << color_res.width() << "x" << color_res.height() << ", scale " << sx << "x" << sy;
+        VIAM_RESOURCE_LOG(debug) << "[get_properties] base_res " << base_res.width() << "x" << base_res.height() << ", served color_res "
+                                 << color_res.width() << "x" << color_res.height() << ", scale " << sx << "x" << sy;
 
-    viam::sdk::Camera::properties props{};
-    props.supports_pcd = true;
+        viam::sdk::Camera::properties props{};
+        props.supports_pcd = true;
 
-    const auto& cm = base.cameraMatrix();
-    props.intrinsic_parameters.width_px = static_cast<int>(color_res.width());
-    props.intrinsic_parameters.height_px = static_cast<int>(color_res.height());
-    props.intrinsic_parameters.focal_x_px = cm.fx().value() * sx;
-    props.intrinsic_parameters.focal_y_px = cm.fy().value() * sy;
-    props.intrinsic_parameters.center_x_px = cm.cx().value() * sx;
-    props.intrinsic_parameters.center_y_px = cm.cy().value() * sy;
+        const auto& cm = base.cameraMatrix();
+        props.intrinsic_parameters.width_px = static_cast<int>(color_res.width());
+        props.intrinsic_parameters.height_px = static_cast<int>(color_res.height());
+        props.intrinsic_parameters.focal_x_px = cm.fx().value() * sx;
+        props.intrinsic_parameters.focal_y_px = cm.fy().value() * sy;
+        props.intrinsic_parameters.center_x_px = cm.cx().value() * sx;
+        props.intrinsic_parameters.center_y_px = cm.cy().value() * sy;
 
-    const auto& dist = base.distortion();
-    props.distortion_parameters.model = "brown_conrady";
-    props.distortion_parameters.parameters =
-        std::vector<double>{dist.k1().value(), dist.k2().value(), dist.p1().value(), dist.p2().value(), dist.k3().value()};
+        const auto& dist = base.distortion();
+        props.distortion_parameters.model = "brown_conrady";
+        props.distortion_parameters.parameters =
+            std::vector<double>{dist.k1().value(), dist.k2().value(), dist.p1().value(), dist.p2().value(), dist.k3().value()};
 
-    props.mime_types = {"image/jpeg", "image/vnd.viam.dep"};
-    props.frame_rate = 0.f;  // on-demand capture; no fixed frame rate
+        props.mime_types = {"image/jpeg", "image/vnd.viam.dep"};
+        props.frame_rate = 0.f;  // on-demand capture; no fixed frame rate
 
-    return props;
+        return props;
+    } catch (const std::exception& e) {
+        const std::string camera_desc = describe_camera(camera_);
+        VIAM_RESOURCE_LOG(error) << "2D color settings rejected by " << camera_desc << ":\n" << settings_2d_.toString();
+        throw std::runtime_error(camera_desc +
+                                 " rejected the configured 2D color settings while computing intrinsics; check acquisitions_2d and "
+                                 "color_pixel_sampling against this camera model: " +
+                                 e.what());
+    }
 }
 
 std::vector<viam::sdk::GeometryConfig> ZividCamera::get_geometries(const viam::sdk::ProtoStruct& /*extra*/) {
@@ -553,7 +766,7 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         return {};
     }
 
-    const auto& cmd = it->second.get_unchecked<std::string>();
+    const auto& cmd = typed_value<std::string>(it->second, "DoCommand field 'command'");
 
     if (cmd == "get_acquisition_ranges") {
         const auto info = camera_.info();
@@ -618,7 +831,7 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         std::string path;
         auto path_it = command.find("path");
         if (path_it != command.end()) {
-            path = path_it->second.get_unchecked<std::string>();
+            path = typed_value<std::string>(path_it->second, "DoCommand field 'path'");
         } else {
             const auto ts =
                 std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -686,7 +899,17 @@ Zivid::Frame ZividCamera::capture_for_calibration() {
     lock.unlock();
 
     VIAM_RESOURCE_LOG(info) << "calibration capture begin";
-    Zivid::Frame frame = camera_.capture2D3D(settings_);
+    std::optional<Zivid::Frame> frame;
+    try {
+        frame = camera_.capture2D3D(settings_);
+    } catch (const std::exception& e) {
+        // Leaving capturing_ set would wedge every later capture on the condition variable.
+        lock.lock();
+        capturing_ = false;
+        lock.unlock();
+        capture_cv_.notify_all();
+        throw std::runtime_error(describe_camera(camera_) + " rejected the configured capture settings: " + e.what());
+    }
     VIAM_RESOURCE_LOG(info) << "calibration capture end";
 
     lock.lock();
@@ -694,7 +917,7 @@ Zivid::Frame ZividCamera::capture_for_calibration() {
     lock.unlock();
     capture_cv_.notify_all();
 
-    return frame;
+    return std::move(*frame);
 }
 
 std::string ZividCamera::serial_number() const {
