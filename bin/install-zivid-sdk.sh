@@ -27,45 +27,11 @@ if [[ -z "${ZIVID_SDK_RELEASE:-}" ]]; then
     exit 1
 fi
 
-OS="$(uname -s)"
-if [[ "$OS" != "Linux" ]]; then
-    echo "install-zivid-sdk.sh: only Linux is supported (got $OS)" >&2
-    exit 1
-fi
-
-if [[ ! -f /etc/os-release ]]; then
-    echo "install-zivid-sdk.sh: cannot detect distribution (missing /etc/os-release)" >&2
-    exit 1
-fi
-# shellcheck disable=SC1091
-. /etc/os-release
-
-# Map (distro, version) → (Ubuntu .deb flavor, install mode). For Debian we
-# pick the closest glibc match: bullseye (2.31) ≈ Ubuntu 20.04, bookworm
-# (2.36) ≈ Ubuntu 22.04.
-case "${ID:-},${VERSION_ID:-}" in
-    ubuntu,20.04) UBUNTU_TAG="u20"; INSTALL_MODE="apt" ;;
-    ubuntu,22.04) UBUNTU_TAG="u22"; INSTALL_MODE="apt" ;;
-    ubuntu,24.04) UBUNTU_TAG="u24"; INSTALL_MODE="apt" ;;
-    debian,11)    UBUNTU_TAG="u20"; INSTALL_MODE="extract" ;;
-    debian,12)    UBUNTU_TAG="u22"; INSTALL_MODE="extract" ;;
-    *)
-        echo "install-zivid-sdk.sh: unsupported distribution ${ID:-unknown}/${VERSION_ID:-unknown}" >&2
-        exit 1
-        ;;
-esac
-
-ARCH="$(dpkg --print-architecture)"
-case "$ARCH" in
-    amd64) ARCH_SUBPATH="" ;;
-    # Zivid hosts arm64 .deb's one directory deeper than amd64
-    # (e.g. .../u22/arm64/zivid_<rel>_arm64.deb).
-    arm64) ARCH_SUBPATH="arm64/" ;;
-    *)
-        echo "install-zivid-sdk.sh: unsupported architecture $ARCH" >&2
-        exit 1
-        ;;
-esac
+# shellcheck source=bin/zivid-deb-target.sh
+. "$(dirname "$0")/zivid-deb-target.sh"
+# Without a package to fetch there is no build and no runtime, so an
+# unsupported host is fatal here.
+zivid_deb_target "install-zivid-sdk.sh"
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT

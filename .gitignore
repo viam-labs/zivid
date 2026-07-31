@@ -2,7 +2,9 @@ CMakeUserPresets.json
 bin/*
 !bin/setup.sh
 !bin/install-zivid-sdk.sh
+!bin/install-zivid-tools.sh
 !bin/install-opencl-icd.sh
+!bin/zivid-deb-target.sh
 !bin/run-clang-format.sh
 build-conan/
 module.tar.gz

@@ -523,16 +523,19 @@ For example, on an Intel host:
 sudo apt-get install -y intel-opencl-icd
 ```
 
-### 3. Grant the `viam` user GPU access
+### 3. Grant GPU access to whoever runs the SDK
 
-Only needed where `viam-agent` runs as the `viam` user rather than as root. That user must be in the `render` and `video` groups to access `/dev/dri/*`:
+`/dev/dri/renderD128` is owned by `root:render`, and on a fresh install the `render` group is empty. Anything that is neither root nor a member of that group gets no OpenCL platform, driver or no driver. Two different users hit this:
+
+- **`viam-agent`**, where it is configured to run as the `viam` user rather than as root.
+- **You**, whenever you run `clinfo` or `ZividFirmwareUpdater` from a shell.
 
 ```bash
-sudo usermod -aG render,video viam
+sudo usermod -aG render,video viam    # and/or your own login
 sudo reboot
 ```
 
-A reboot (or at minimum a restart of `viam-agent`) is required for the new group membership to take effect.
+A reboot (or at minimum a restart of `viam-agent`) is required for the new group membership to take effect. For one-off interactive commands, `sudo` does the same job with no reboot.
 
 ### 4. Verify
 
@@ -544,13 +547,63 @@ ls -l /dev/dri/           # render/card nodes should exist
 
 `clinfo` should report at least one OpenCL platform and one device. If it prints `Number of platforms: 0`, the vendor ICD is missing or not registered under `/etc/OpenCL/vendors/`.
 
-If `intel-opencl-icd` is installed and registered but `clinfo` still reports no platform, check which kernel driver owns the GPU:
+> **`Failed to get platforms` / `CL_PLATFORM_NOT_FOUND_KHR` does not necessarily mean the driver is missing.** The ICD loader emits that exact message — the one quoted at the top of this section — when it cannot open `/dev/dri/renderD128`, which is what a non-root user outside the `render` group always gets. Before chasing a driver problem, run the same command again under `sudo`. If it now lists a platform, the driver is fine and step 3 is what is missing.
+
+If `intel-opencl-icd` is installed and registered but `clinfo` still reports no platform even under `sudo`, check which kernel driver owns the GPU:
 
 ```bash
 ls -l /sys/class/drm/card*/device/driver
 ```
 
 Ubuntu 24.04's `intel-opencl-icd` (23.43) enumerates zero devices on GPUs bound to the newer `xe` driver; it works on `i915`. Intel's PPA (`ppa:kobuk-team/intel-graphics`) carries a build that handles `xe`. See [intel/compute-runtime#903](https://github.com/intel/compute-runtime/issues/903). The first-run hook does not add that PPA — adding third-party apt sources is an operator decision.
+
+---
+
+## Camera firmware updates
+
+Camera firmware is version-locked to the SDK. The SDK does not degrade or warn when they disagree, it refuses the connection, so a camera left behind by an SDK upgrade is a dead resource until it is reflashed:
+
+```
+Unable to connect to camera. Camera 26179B29 requires a firmware update.
+Camera has firmware "1.36.0+75fc1b59". API supported firmware: "1.39.0+6512a195".
+```
+
+The updater is `ZividFirmwareUpdater`, from the `zivid-tools` package. `first_run.sh` installs it via `install-zivid-tools.sh`, pinned to the release the SDK on that machine actually came from: the firmware image ships inside the package, so a `zivid-tools` that does not match the installed SDK would flash the wrong firmware. The step is idempotent and non-fatal, so confirm it is there rather than assuming:
+
+```bash
+dpkg -s zivid-tools | grep -E '^(Status|Version)'
+dpkg -s zivid       | grep -E '^(Status|Version)'   # versions must match
+```
+
+### Running the updater
+
+Stop the module (or the machine) first — the updater needs to open the camera, and the SDK will not hand it over while the module holds it.
+
+```bash
+sudo ZividFirmwareUpdater          # walks the cameras it can see
+sudo ZividFirmwareUpdater --help   # non-interactive options
+```
+
+> **Run it under `sudo`.** Without it the updater fails on a machine whose OpenCL is perfectly healthy, and it fails with the *same* message as a machine with no driver at all:
+>
+> ```
+> An OpenCL error occurred: Failed to get platforms
+> [CL_PLATFORM_NOT_FOUND_KHR]
+> ```
+>
+> `/dev/dri/renderD128` is `root:render` and the `render` group is empty by default, so an ordinary login sees no platform. `sudo clinfo -l` versus `clinfo -l` tells the two cases apart in one step. See [step 3](#3-grant-gpu-access-to-whoever-runs-the-sdk) for the permanent fix.
+
+### Installing `zivid-tools` by hand
+
+`zivid-tools` is not in any apt repo configured on these machines; it is fetched from Zivid's downloads server by release. Match the installed SDK exactly, and match the Ubuntu flavor (`u20`, `u22` or `u24`) and architecture of the host:
+
+```bash
+REL=$(dpkg-query --show --showformat='${Version}' zivid)   # e.g. 2.17.2+440b2367-1
+curl -fLO "https://downloads.zivid.com/sdk/releases/${REL}/u24/zivid-tools_${REL}_amd64.deb"
+sudo apt-get install -y "./zivid-tools_${REL}_amd64.deb"
+```
+
+On arm64 the path carries an extra directory: `.../u24/arm64/zivid-tools_${REL}_arm64.deb`.
 
 ---
 
