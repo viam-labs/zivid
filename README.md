@@ -66,6 +66,24 @@ Each entry in `acquisitions` supports:
 | `exposure_time_us` | float | No       | Exposure time in microseconds. Valid range depends on camera model. |
 | `gain`             | float | No       | Analog sensor gain. Valid range depends on camera model.            |
 
+#### Config validation
+
+The module validates the config before it starts serving, and refuses to configure rather than
+capture with settings that were not asked for:
+
+- **Wrong JSON type** — an attribute written with the wrong type (`"exposure_time_us": "20000"` as a
+  string, `"engine": 1` as a number, `acquisitions` as an object instead of a list) is reported by
+  full attribute path, e.g. `config attribute 'roi.box.point_o.x' must be of type number, but is of
+  type string.`
+- **Out-of-range acquisition values** — `aperture`, `brightness`, `exposure_time_us`, `gain` and the
+  noise-removal `threshold` are checked twice: against the range the Zivid SDK accepts for any
+  camera, then against the range the *connected* camera reports. Values are never silently clamped;
+  the error quotes the accepted range and the camera model that rejected the value.
+- **Missing required keys** — inside `roi.box`, the keys `point_o`, `point_a`, `point_b` and
+  `extents` are required once the block is present.
+
+Use [`get_acquisition_ranges`](#get_acquisition_ranges) to discover the ranges your camera accepts.
+
 #### Region of Interest
 
 Both ROI types are optional and can be used independently or together.
@@ -137,7 +155,7 @@ The point cloud stays fully colored at any resolution — each (now larger) poin
 | Name        | Type  | Required | Description                                                                                                       |
 | ----------- | ----- | -------- | ----------------------------------------------------------------------------------------------------------------- |
 | `enabled`   | bool  | No       | Enable/disable the noise removal filter.                                                                          |
-| `threshold` | float | No       | Higher = remove more noise (fewer floating points, more holes). Valid range depends on camera; clamped if exceeded. |
+| `threshold` | float | No       | Higher = remove more noise (fewer floating points, more holes). Valid range depends on camera; out-of-range values are rejected. |
 
 > Note: noise removal trims floating points but can leave missing data. Per Zivid support, the more robust fix for points "skirting" a vertical surface is to angle the camera (a slight `rx`/`ry` rotation) so the projection isn't grazing the surface.
 
