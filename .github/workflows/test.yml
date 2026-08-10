@@ -1,0 +1,65 @@
+name: Test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    env:
+      # Configure as a repository Actions variable (Settings →
+      # Secrets and variables → Actions → Variables). The Zivid release
+      # identifier includes a git-hash suffix (e.g. "2.17.2+440b2367-1") and
+      # changes with each Zivid SDK release — find the current value at
+      # https://www.zivid.com/downloads.
+      ZIVID_SDK_RELEASE: ${{ vars.ZIVID_SDK_RELEASE }}
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Check required variables
+        run: |
+          if [[ -z "$ZIVID_SDK_RELEASE" ]]; then
+            echo "::error::Missing repository Actions variable: ZIVID_SDK_RELEASE"
+            echo "Configure it under Settings → Secrets and variables → Actions → Variables."
+            exit 1
+          fi
+
+      - name: Install Zivid SDK
+        run: |
+          ARCH=$(dpkg --print-architecture)
+          # Zivid hosts arm64 .deb's one directory deeper than amd64
+          # (e.g. .../u22/arm64/zivid_<rel>_arm64.deb).
+          ARCH_SUBPATH=""
+          [[ "$ARCH" == "arm64" ]] && ARCH_SUBPATH="arm64/"
+          ZIVID_DEB="zivid_${ZIVID_SDK_RELEASE}_${ARCH}.deb"
+          curl --fail --silent --show-error --location \
+            "https://downloads.zivid.com/sdk/releases/${ZIVID_SDK_RELEASE}/u22/${ARCH_SUBPATH}${ZIVID_DEB}" \
+            -o "${ZIVID_DEB}"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "./${ZIVID_DEB}"
+
+      # Skips the ~2h Conan rebuild of viam-cpp-sdk on cache hit.
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py') }}
+          restore-keys: |
+            conan-${{ runner.os }}-
+
+      - name: Setup
+        run: make setup
+
+      - name: Run tests
+        run: make test
