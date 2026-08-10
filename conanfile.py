@@ -42,6 +42,7 @@ class ViamZivid(ConanFile):
 
     def generate(self):
         tc = CMakeToolchain(self)
+        tc.cache_variables["ZIVID_BUILD_TESTS"] = bool(self.options.with_tests)
         tc.generate()
         CMakeDeps(self).generate()
 

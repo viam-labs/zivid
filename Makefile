@@ -6,7 +6,7 @@ BINARY := viam-camera-zivid
 
 export CONAN_FLAGS := -s:a build_type=Release -s:a compiler.cppstd=17
 
-.PHONY: setup build conan-build module.tar.gz clean check-sdk lint
+.PHONY: setup build conan-build conan-install-test conan-build-test test module.tar.gz clean check-sdk lint
 
 default: build
 
@@ -53,6 +53,24 @@ build:
 module.tar.gz: build
 
 conan-build: setup build
+
+conan-install-test:
+	@test -f ./venv/bin/activate || $(MAKE) setup
+	. ./venv/bin/activate; \
+	conan install . \
+		--output-folder=$(CONAN_OUTPUT) \
+		--build=missing \
+		-o "&:with_tests=True" \
+		$(CONAN_FLAGS)
+
+conan-build-test:
+	test -f ./venv/bin/activate && . ./venv/bin/activate; \
+	cmake --preset conan-release
+	test -f ./venv/bin/activate && . ./venv/bin/activate; \
+	cmake --build $(CMAKE_BUILD_DIR) --config Release
+
+test: conan-install-test conan-build-test
+	cd $(CMAKE_BUILD_DIR) && . ./generators/conanrun.sh && ctest --output-on-failure
 
 clean:
 	rm -rf $(CONAN_OUTPUT) $(BIN_DIR) module.tar.gz venv

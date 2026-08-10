@@ -50,3 +50,9 @@ target_link_libraries(${PROJECT_NAME}
 install(TARGETS ${PROJECT_NAME} DESTINATION .)
 install(FILES meta.json DESTINATION .)
 install(PROGRAMS first_run.sh bin/install-zivid-sdk.sh DESTINATION .)
+
+option(ZIVID_BUILD_TESTS "Build unit tests" OFF)
+if(ZIVID_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()
