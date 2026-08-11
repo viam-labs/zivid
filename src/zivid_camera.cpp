@@ -737,10 +737,11 @@ viam::sdk::Camera::properties ZividCamera::get_properties() {
         props.intrinsic_parameters.center_x_px = cm.cx().value() * sx;
         props.intrinsic_parameters.center_y_px = cm.cy().value() * sy;
 
+        // RDK's BrownConrady contract is [k1, k2, k3, p1, p2] (radial first, then tangential).
         const auto& dist = base.distortion();
         props.distortion_parameters.model = "brown_conrady";
         props.distortion_parameters.parameters =
-            std::vector<double>{dist.k1().value(), dist.k2().value(), dist.p1().value(), dist.p2().value(), dist.k3().value()};
+            std::vector<double>{dist.k1().value(), dist.k2().value(), dist.k3().value(), dist.p1().value(), dist.p2().value()};
 
         props.mime_types = {"image/jpeg", "image/vnd.viam.dep"};
         props.frame_rate = 0.f;  // on-demand capture; no fixed frame rate
