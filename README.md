@@ -300,6 +300,66 @@ Each discovered camera is returned with the following attributes pre-populated:
 | `model_name`               | Zivid model name (e.g. `Zivid Two`).                                            |
 | `firmware_update_required` | Present and `true` if the camera needs a firmware update before it can be used. |
 
+#### do_command
+
+##### `update_firmware`
+
+Flashes attached Zivid cameras with the firmware required by the Zivid SDK this module was built against. Each SDK version is pinned to a specific camera firmware version; when they disagree the camera reports `firmwareUpdateRequired` and `viam:zivid:camera` cannot connect to it.
+
+Because flashing is destructive and cannot be interrupted safely, the command is a **two-step, confirm-to-run** operation.
+
+**Step 1 — preview (always fails on purpose, changes nothing):**
+
+```python
+discovery.do_command({"update_firmware": True})
+```
+
+Any value works here — only `{"confirm": true}` runs the update. This call raises an error whose message lists which cameras will be updated, which ones are blocked and why, which are already up to date, and what to do before confirming:
+
+```
+update_firmware requires confirmation — NOTHING HAS BEEN CHANGED.
+
+The following 1 camera(s) WILL BE UPDATED to the firmware required by Zivid SDK 2.17.2:
+  - Zivid 2+ MR130 S/N 2436D9F1 (firmware 2.15.0, status: firmwareUpdateRequired)
+
+Already up to date (will be left alone):
+  - Zivid Two S/N 2308A1B2 (firmware 2.17.2, status: available)
+
+Before confirming:
+  1. Remove or disable every viam:zivid:camera component configured for the camera(s) to be updated, ...
+  ...
+
+To proceed, send:
+  {"update_firmware": {"confirm": true}}
+```
+
+**Step 2 — run it:**
+
+```python
+discovery.do_command({"update_firmware": {"confirm": True}})
+```
+
+Response:
+
+```json
+{
+  "updated": ["2436D9F1"],
+  "skipped": ["2308A1B2: already up to date"],
+  "message": "Updated firmware on 1 camera(s). Each updated camera is rebooting — ..."
+}
+```
+
+If any camera that needed an update was not updated, the command raises an error naming each one and the reason, along with any that did succeed.
+
+**Before running it:**
+
+- **Nothing may hold the camera open.** Remove or disable every `viam:zivid:camera` component configured for the camera's serial number, and close Zivid Studio or any other process using it. A connected or busy camera is reported as blocked rather than flashed.
+- **Do not power off or unplug the camera during the update.** Interrupting a firmware update can leave the camera unusable.
+- **Expect several minutes per camera.** The call blocks until every camera is done, so use a long client timeout. If the client times out anyway the update keeps running inside the module — progress is logged per stage to the machine logs, and re-running the preview shows the result.
+- **The camera reboots afterwards.** Re-add its `viam:zivid:camera` component (or re-run discovery) once it is back.
+
+Concurrent `update_firmware` calls are rejected while an update is running.
+
 ---
 
 ### `viam:zivid:handeye-calibration`
