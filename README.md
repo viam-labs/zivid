@@ -52,12 +52,13 @@ Acquisition ranges vary by camera model. Use [`get_acquisition_ranges`](#get_acq
 | `serial_number`        | string | No       | Serial number of the camera to connect to. If omitted, connects to the first available camera.                                              |
 | `engine`               | string | No       | Zivid Vision Engine to use. Valid values: `phase`, `stripe`, `omni`, `sage`. Default: camera default.                                       |
 | `acquisitions`         | list   | No       | List of acquisition configurations. Multiple entries enable HDR capture. Defaults to a single acquisition with camera defaults if omitted.  |
+| `acquisitions_2d`      | list   | No       | Acquisition configurations for the 2D color capture. Multiple entries enable HDR color. Defaults to a single acquisition with camera defaults if omitted. |
 | `pixel_sampling`       | string | No       | 3D (depth / point cloud) resolution. Subsamples or bins the sensor readout — fewer points and **faster capture + processing**. Valid values: `all`, `by2x2`, `by4x4`, `blueSubsample2x2`, `blueSubsample4x4`, `redSubsample2x2`, `redSubsample4x4`. Default: `all` (full resolution). |
 | `color_pixel_sampling` | string | No       | 2D color resolution (also the color baked into the point cloud). Same valid values as `pixel_sampling`. Default: `all`.                      |
 | `roi`                  | object | No       | Region of interest. See below.                                                                                                              |
 | `processing`           | object | No       | Point-cloud processing filters. See below.                                                                                                  |
 
-Each entry in `acquisitions` supports:
+Each entry in `acquisitions` and `acquisitions_2d` supports:
 
 | Name               | Type  | Required | Description                                                         |
 | ------------------ | ----- | -------- | ------------------------------------------------------------------- |
@@ -167,6 +168,23 @@ The point cloud stays fully colored at any resolution — each (now larger) poin
 | ----------- | -------------------- | --------------------------------------------------------------------------------- |
 | `color`     | `image/jpeg`         | 2D color image in sRGB color space.                                               |
 | `depth`     | `image/vnd.viam.dep` | Depth map with Z values in millimetres as uint16. Invalid points are stored as 0. |
+
+Which sources a request asks for decides what the camera actually does, because only depth needs the structured-light pattern:
+
+| Request                                                     | Capture  | Projector                                                        |
+| ----------------------------------------------------------- | -------- | ---------------------------------------------------------------- |
+| `get_images(["color"])`                                     | 2D       | Flashes at the `acquisitions_2d` brightness. No pattern.         |
+| `get_images(["depth"])`, `get_images()`, `get_point_cloud`   | 2D + 3D  | Projects the structured-light pattern.                           |
+
+This matters for the camera card on a machine's **CONTROL** tab: it polls `get_images(["color"])` at its refresh rate, once a second by default, so serving color from a 2D+3D capture would sweep the pattern continuously for as long as the card is open.
+
+Captures are cached for 500 ms, and the color path will serve the color layer of a still-fresh 2D+3D frame, so a `get_point_cloud` followed by a color `get_images` costs one capture rather than two.
+
+To take the 2D color image with the projector fully dark, relying on ambient light instead, set its brightness to zero:
+
+```json
+"acquisitions_2d": [{ "brightness": 0 }]
+```
 
 #### Point cloud
 

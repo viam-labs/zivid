@@ -61,6 +61,19 @@ std::vector<unsigned char> encode_jpeg(const uint8_t* rgba_data, int width, int 
     return buf;
 }
 
+// Encode the color layer of a 2D frame as the `color` source image.
+viam::sdk::Camera::raw_image encode_color_image(const Zivid::Frame2D& frame_2d) {
+    const auto color_img = frame_2d.imageRGBA_SRGB();
+    const int w = static_cast<int>(color_img.width());
+    const int h = static_cast<int>(color_img.height());
+
+    viam::sdk::Camera::raw_image color_raw;
+    color_raw.mime_type = "image/jpeg";
+    color_raw.bytes = encode_jpeg(reinterpret_cast<const uint8_t*>(color_img.data()), w, h);
+    color_raw.source_name = kColorSourceName;
+    return color_raw;
+}
+
 // Apply sRGB gamma encoding to a linear uint8 value to brighten it for viewers
 // that treat stored PCD colors as linear (e.g. CloudCompare without sRGB support).
 uint8_t gamma_encode(uint8_t v) {
@@ -600,24 +613,26 @@ ZividCamera::~ZividCamera() {
     }
 }
 
+void ZividCamera::wait_for_capture(std::unique_lock<std::mutex>& lock) {
+    capture_cv_.wait(lock, [this] { return !capturing_; });
+    if (last_capture_failed_) {
+        throw std::runtime_error("capture failed on another thread; see the preceding error");
+    }
+}
+
 Zivid::Frame ZividCamera::get_or_capture() {
     std::unique_lock<std::mutex> lock(capture_mutex_);
 
-    // Return cached frame if still fresh.
-    const auto now = std::chrono::steady_clock::now();
-    if (cached_frame_ && (now - cached_frame_time_) < kFrameCacheTtl) {
-        return *cached_frame_;
-    }
-
-    // Another thread is already capturing — wait for it to finish and reuse its frame.
-    if (capturing_) {
-        capture_cv_.wait(lock, [this] { return !capturing_; });
-        // The owning thread clears capturing_ on failure too, in which case there is no frame
-        // to hand back and dereferencing the empty optional would be undefined behaviour.
-        if (!cached_frame_) {
-            throw std::runtime_error("capture failed on another thread; see the preceding error");
+    while (true) {
+        if (cached_frame_ && (std::chrono::steady_clock::now() - cached_frame_time_) < kFrameCacheTtl) {
+            return *cached_frame_;
         }
-        return *cached_frame_;
+        if (!capturing_) {
+            break;
+        }
+        // The in-flight capture may be a color-only one, which leaves cached_frame_ untouched,
+        // so re-check the cache after waiting rather than assuming it can serve this request.
+        wait_for_capture(lock);
     }
 
     // This thread owns the capture.
@@ -633,6 +648,7 @@ Zivid::Frame ZividCamera::get_or_capture() {
         // Leaving capturing_ set would wedge every later capture on the condition variable.
         lock.lock();
         capturing_ = false;
+        last_capture_failed_ = true;
         lock.unlock();
         capture_cv_.notify_all();
         throw std::runtime_error(describe_camera(camera_) + " rejected the configured capture settings: " + e.what());
@@ -644,10 +660,69 @@ Zivid::Frame ZividCamera::get_or_capture() {
     cached_frame_ = std::move(frame);
     cached_frame_time_ = std::chrono::steady_clock::now();
     capturing_ = false;
+    last_capture_failed_ = false;
+    // Copied under the lock: a later capture may reassign cached_frame_ the moment the
+    // lock drops, and copying a Zivid handle out from under that is a data race.
+    Zivid::Frame captured = *cached_frame_;
     lock.unlock();
 
     capture_cv_.notify_all();
-    return *cached_frame_;
+    return captured;
+}
+
+Zivid::Frame2D ZividCamera::get_or_capture_2d() {
+    std::unique_lock<std::mutex> lock(capture_mutex_);
+
+    while (true) {
+        const auto now = std::chrono::steady_clock::now();
+        // A fresh 2D+3D frame already carries the color layer, so serving it here is what
+        // keeps a point cloud request plus a color request down to one capture.
+        if (cached_frame_ && (now - cached_frame_time_) < kFrameCacheTtl) {
+            if (auto frame_2d = cached_frame_->frame2D()) {
+                return *frame_2d;
+            }
+        }
+        if (cached_frame_2d_ && (now - cached_frame_2d_time_) < kFrameCacheTtl) {
+            return *cached_frame_2d_;
+        }
+        if (!capturing_) {
+            break;
+        }
+        wait_for_capture(lock);
+    }
+
+    capturing_ = true;
+    lock.unlock();
+
+    VIAM_RESOURCE_LOG(info) << "2D capture begin";
+    const auto capture_start = std::chrono::steady_clock::now();
+    std::optional<Zivid::Frame2D> frame;
+    try {
+        // settings_ rather than settings_2d_: get_properties() reports intrinsics scaled to
+        // resolution2D(info, settings_), so capturing from the bare 2D settings can hand back
+        // a different resolution and put the served image out of step with those intrinsics.
+        frame = camera_.capture2D(settings_);
+    } catch (const std::exception& e) {
+        lock.lock();
+        capturing_ = false;
+        last_capture_failed_ = true;
+        lock.unlock();
+        capture_cv_.notify_all();
+        throw std::runtime_error(describe_camera(camera_) + " rejected the configured 2D color capture settings: " + e.what());
+    }
+    const auto capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - capture_start).count();
+    VIAM_RESOURCE_LOG(info) << "2D capture end (" << capture_ms << " ms)";
+
+    lock.lock();
+    cached_frame_2d_ = std::move(frame);
+    cached_frame_2d_time_ = std::chrono::steady_clock::now();
+    capturing_ = false;
+    last_capture_failed_ = false;
+    Zivid::Frame2D captured = *cached_frame_2d_;
+    lock.unlock();
+
+    capture_cv_.notify_all();
+    return captured;
 }
 
 viam::sdk::Camera::image_collection ZividCamera::get_images(std::vector<std::string> filter_source_names,
@@ -659,39 +734,41 @@ viam::sdk::Camera::image_collection ZividCamera::get_images(std::vector<std::str
         filter_source_names.empty() ||
         std::find(filter_source_names.begin(), filter_source_names.end(), kDepthSourceName) != filter_source_names.end();
 
-    auto frame = get_or_capture();
-
     viam::sdk::Camera::image_collection result;
+
+    // The filter named only sources this camera does not serve, so there is nothing to capture for.
+    if (!want_color && !want_depth) {
+        return result;
+    }
+
+    // Only depth needs the structured-light pattern. Routing color-only requests through the
+    // 2D path keeps polling the color image — which the app's camera control card does once a
+    // second by default — from firing the projector pattern on every poll.
+    if (!want_depth) {
+        result.images.push_back(encode_color_image(get_or_capture_2d()));
+        return result;
+    }
+
+    auto frame = get_or_capture();
 
     if (want_color) {
         auto opt_frame2d = frame.frame2D();
         if (!opt_frame2d) {
             throw std::runtime_error("No 2D frame in capture result");
         }
-        const auto color_img = opt_frame2d->imageRGBA_SRGB();
-        const int w = static_cast<int>(color_img.width());
-        const int h = static_cast<int>(color_img.height());
-        auto jpeg = encode_jpeg(reinterpret_cast<const uint8_t*>(color_img.data()), w, h);
-
-        viam::sdk::Camera::raw_image color_raw;
-        color_raw.mime_type = "image/jpeg";
-        color_raw.bytes = std::move(jpeg);
-        color_raw.source_name = kColorSourceName;
-        result.images.push_back(std::move(color_raw));
+        result.images.push_back(encode_color_image(*opt_frame2d));
     }
 
-    if (want_depth) {
-        const auto pc = frame.pointCloud();
-        const auto xyz = pc.copyPointsXYZ();
-        auto dm = build_depth_map(xyz, pc.width(), pc.height());
-        auto encoded = viam::sdk::Camera::encode_depth_map(dm);
+    const auto pc = frame.pointCloud();
+    const auto xyz = pc.copyPointsXYZ();
+    auto dm = build_depth_map(xyz, pc.width(), pc.height());
+    auto encoded = viam::sdk::Camera::encode_depth_map(dm);
 
-        viam::sdk::Camera::raw_image depth_raw;
-        depth_raw.mime_type = "image/vnd.viam.dep";
-        depth_raw.bytes = std::move(encoded);
-        depth_raw.source_name = kDepthSourceName;
-        result.images.push_back(std::move(depth_raw));
-    }
+    viam::sdk::Camera::raw_image depth_raw;
+    depth_raw.mime_type = "image/vnd.viam.dep";
+    depth_raw.bytes = std::move(encoded);
+    depth_raw.source_name = kDepthSourceName;
+    result.images.push_back(std::move(depth_raw));
 
     return result;
 }
@@ -854,6 +931,7 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         } catch (...) {
             lock.lock();
             capturing_ = false;
+            last_capture_failed_ = true;
             capture_cv_.notify_all();
             throw;
         }
@@ -861,6 +939,7 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
 
         lock.lock();
         capturing_ = false;
+        last_capture_failed_ = false;
         capture_cv_.notify_all();
 
         viam::sdk::ProtoStruct result;
@@ -907,6 +986,7 @@ Zivid::Frame ZividCamera::capture_for_calibration() {
         // Leaving capturing_ set would wedge every later capture on the condition variable.
         lock.lock();
         capturing_ = false;
+        last_capture_failed_ = true;
         lock.unlock();
         capture_cv_.notify_all();
         throw std::runtime_error(describe_camera(camera_) + " rejected the configured capture settings: " + e.what());
@@ -915,6 +995,7 @@ Zivid::Frame ZividCamera::capture_for_calibration() {
 
     lock.lock();
     capturing_ = false;
+    last_capture_failed_ = false;
     lock.unlock();
     capture_cv_.notify_all();
 
