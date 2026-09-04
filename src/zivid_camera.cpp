@@ -632,7 +632,7 @@ Zivid::Frame ZividCamera::get_or_capture() {
         }
         // The in-flight capture may be a color-only one, which leaves cached_frame_ untouched,
         // so re-check the cache after waiting rather than assuming it can serve this request.
-        wait_for_capture(lock);
+        wait_for_capture_in_lock(lock);
     }
 
     // This thread owns the capture.
