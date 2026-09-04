@@ -11,6 +11,7 @@
 #include <Zivid/Application.h>
 #include <Zivid/Camera.h>
 #include <Zivid/Frame.h>
+#include <Zivid/Frame2D.h>
 #include <Zivid/Settings.h>
 #include <Zivid/Settings2D.h>
 
@@ -110,9 +111,19 @@ class ZividCamera : public viam::sdk::Camera {
    private:
     static std::mutex registry_mutex_;
     static std::unordered_map<std::string, ZividCamera*> registry_;
-    // Returns the cached frame if it is younger than kFrameCacheTtl, otherwise
+    // Returns the cached 2D+3D frame if it is younger than kFrameCacheTtl, otherwise
     // triggers a new capture and updates the cache.
     Zivid::Frame get_or_capture();
+
+    // Returns a 2D color frame without projecting the structured-light pattern.
+    // Prefers the color layer of a still-fresh 2D+3D frame, so a point cloud request
+    // followed by a color request still costs a single capture.
+    Zivid::Frame2D get_or_capture_2d();
+
+    // Blocks until the in-flight capture hands the camera back. Throws if that capture
+    // failed, so a burst of callers does not each re-fire a capture that is failing.
+    // Caller must hold capture_mutex_ through `lock`.
+    void wait_for_capture_in_lock(std::unique_lock<std::mutex>& lock);
 
     static constexpr std::chrono::milliseconds kFrameCacheTtl{500};
 
@@ -127,8 +138,13 @@ class ZividCamera : public viam::sdk::Camera {
     std::mutex capture_mutex_;
     std::condition_variable capture_cv_;
     bool capturing_{false};
+    // Whether the capture that last cleared capturing_ threw. Read by threads woken from
+    // capture_cv_, so every path that takes capturing_ must also set this on release.
+    bool last_capture_failed_{false};
     std::optional<Zivid::Frame> cached_frame_;
     std::chrono::steady_clock::time_point cached_frame_time_;
+    std::optional<Zivid::Frame2D> cached_frame_2d_;
+    std::chrono::steady_clock::time_point cached_frame_2d_time_;
 };
 
 }  // namespace viam_zivid

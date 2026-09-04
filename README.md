@@ -47,17 +47,18 @@ Acquisition ranges vary by camera model. Use [`get_acquisition_ranges`](#get_acq
 
 #### Attributes
 
-| Name                   | Type   | Required | Description                                                                                                                                 |
-| ---------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `serial_number`        | string | No       | Serial number of the camera to connect to. If omitted, connects to the first available camera.                                              |
-| `engine`               | string | No       | Zivid Vision Engine to use. Valid values: `phase`, `stripe`, `omni`, `sage`. Default: camera default.                                       |
-| `acquisitions`         | list   | No       | List of acquisition configurations. Multiple entries enable HDR capture. Defaults to a single acquisition with camera defaults if omitted.  |
+| Name                   | Type   | Required | Description                                                                                                                                                                                                                                                                           |
+| ---------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serial_number`        | string | No       | Serial number of the camera to connect to. If omitted, connects to the first available camera.                                                                                                                                                                                        |
+| `engine`               | string | No       | Zivid Vision Engine to use. Valid values: `phase`, `stripe`, `omni`, `sage`. Default: camera default.                                                                                                                                                                                 |
+| `acquisitions`         | list   | No       | List of acquisition configurations. Multiple entries enable HDR capture. Defaults to a single acquisition with camera defaults if omitted.                                                                                                                                            |
+| `acquisitions_2d`      | list   | No       | Acquisition configurations for the 2D color capture. Multiple entries enable HDR color. Defaults to a single acquisition with camera defaults if omitted.                                                                                                                             |
 | `pixel_sampling`       | string | No       | 3D (depth / point cloud) resolution. Subsamples or bins the sensor readout — fewer points and **faster capture + processing**. Valid values: `all`, `by2x2`, `by4x4`, `blueSubsample2x2`, `blueSubsample4x4`, `redSubsample2x2`, `redSubsample4x4`. Default: `all` (full resolution). |
-| `color_pixel_sampling` | string | No       | 2D color resolution (also the color baked into the point cloud). Same valid values as `pixel_sampling`. Default: `all`.                      |
-| `roi`                  | object | No       | Region of interest. See below.                                                                                                              |
-| `processing`           | object | No       | Point-cloud processing filters. See below.                                                                                                  |
+| `color_pixel_sampling` | string | No       | 2D color resolution (also the color baked into the point cloud). Same valid values as `pixel_sampling`. Default: `all`.                                                                                                                                                               |
+| `roi`                  | object | No       | Region of interest. See below.                                                                                                                                                                                                                                                        |
+| `processing`           | object | No       | Point-cloud processing filters. See below.                                                                                                                                                                                                                                            |
 
-Each entry in `acquisitions` supports:
+Each entry in `acquisitions` and `acquisitions_2d` supports:
 
 | Name               | Type  | Required | Description                                                         |
 | ------------------ | ----- | -------- | ------------------------------------------------------------------- |
@@ -152,9 +153,9 @@ The point cloud stays fully colored at any resolution — each (now larger) poin
 
 > The Zivid SDK validates pixel-sampling combinations and will reject incompatible `pixel_sampling`/`color_pixel_sampling` pairings at capture time. If you hit such an error, set both to the same mode.
 
-| Name        | Type  | Required | Description                                                                                                       |
-| ----------- | ----- | -------- | ----------------------------------------------------------------------------------------------------------------- |
-| `enabled`   | bool  | No       | Enable/disable the noise removal filter.                                                                          |
+| Name        | Type  | Required | Description                                                                                                                      |
+| ----------- | ----- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`   | bool  | No       | Enable/disable the noise removal filter.                                                                                         |
 | `threshold` | float | No       | Higher = remove more noise (fewer floating points, more holes). Valid range depends on camera; out-of-range values are rejected. |
 
 > Note: noise removal trims floating points but can leave missing data. Per Zivid support, the more robust fix for points "skirting" a vertical surface is to angle the camera (a slight `rx`/`ry` rotation) so the projection isn't grazing the surface.
@@ -167,6 +168,22 @@ The point cloud stays fully colored at any resolution — each (now larger) poin
 | ----------- | -------------------- | --------------------------------------------------------------------------------- |
 | `color`     | `image/jpeg`         | 2D color image in sRGB color space.                                               |
 | `depth`     | `image/vnd.viam.dep` | Depth map with Z values in millimetres as uint16. Invalid points are stored as 0. |
+
+Which sources a request asks for decides what the camera actually does, because only depth needs the structured-light pattern:
+
+| Request                                                    | Capture | Projector                                                |
+| ---------------------------------------------------------- | ------- | -------------------------------------------------------- |
+| `get_images(["color"])`                                    | 2D      | Flashes at the `acquisitions_2d` brightness. No pattern. |
+| `get_images(["depth"])`, `get_images()`, `get_point_cloud` | 2D + 3D | Projects the structured-light pattern.                   |
+
+
+Captures are cached for 500 ms, and the color path will serve the color layer of a still-fresh 2D+3D frame, so a `get_point_cloud` followed by a color `get_images` costs one capture rather than two.
+
+To take the 2D color image with the projector fully dark, relying on ambient light instead, set its brightness to zero:
+
+```json
+"acquisitions_2d": [{ "brightness": 0 }]
+```
 
 #### Point cloud
 
@@ -256,9 +273,9 @@ result = camera.do_command({"command": "save_zdf", "path": "/var/lib/viam/issue.
 
 Arguments:
 
-| Name   | Type   | Required | Description                                                                                          |
-| ------ | ------ | -------- | ---------------------------------------------------------------------------------------------------- |
-| `path` | string | No       | Absolute path to write the `.zdf` to. Default: `/var/lib/viam/zivid_diagnostic_<serial>_<ms>.zdf`.   |
+| Name   | Type   | Required | Description                                                                                        |
+| ------ | ------ | -------- | -------------------------------------------------------------------------------------------------- |
+| `path` | string | No       | Absolute path to write the `.zdf` to. Default: `/var/lib/viam/zivid_diagnostic_<serial>_<ms>.zdf`. |
 
 Response:
 
@@ -327,12 +344,12 @@ The referenced `viam:zivid:camera` must also exist on the machine; it is looked 
 
 #### Attributes
 
-| Name                | Type   | Required | Description                                                                                                                                |
-| ------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `arm`               | string | Yes      | Name of the arm component to read end-effector poses from. Must also appear in `depends_on`.                                               |
-| `camera`            | string | Yes      | Name of the `viam:zivid:camera` component to capture frames from.                                                                          |
-| `save_dir`          | string | No       | Directory where calibration result JSON files are written. Default: `/var/lib/viam`.                                                       |
-| `marker_dictionary` | string | No       | ArUco marker dictionary name (used when `detection_mode='markers'`). Default: `aruco4x4_50`.                                               |
+| Name                | Type   | Required | Description                                                                                  |
+| ------------------- | ------ | -------- | -------------------------------------------------------------------------------------------- |
+| `arm`               | string | Yes      | Name of the arm component to read end-effector poses from. Must also appear in `depends_on`. |
+| `camera`            | string | Yes      | Name of the `viam:zivid:camera` component to capture frames from.                            |
+| `save_dir`          | string | No       | Directory where calibration result JSON files are written. Default: `/var/lib/viam`.         |
+| `marker_dictionary` | string | No       | ArUco marker dictionary name (used when `detection_mode='markers'`). Default: `aruco4x4_50`. |
 
 #### do_command
 
@@ -354,10 +371,10 @@ camera.do_command({
 
 Arguments:
 
-| Name             | Type        | Required | Description                                                                                       |
-| ---------------- | ----------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `detection_mode` | string      | No       | `calibration_board` (default) or `markers`.                                                       |
-| `marker_ids`     | list of int | Yes\*    | List of ArUco marker IDs to detect. Required when `detection_mode='markers'`.                     |
+| Name             | Type        | Required | Description                                                                   |
+| ---------------- | ----------- | -------- | ----------------------------------------------------------------------------- |
+| `detection_mode` | string      | No       | `calibration_board` (default) or `markers`.                                   |
+| `marker_ids`     | list of int | Yes\*    | List of ArUco marker IDs to detect. Required when `detection_mode='markers'`. |
 
 Response includes `detected` (bool), `accumulated_count`, and either `centroid` (board mode) or `detected_marker_ids` (markers mode). When detection fails, `status_description` explains why.
 
@@ -445,18 +462,18 @@ As with the calibration service, the `viam:zivid:camera` is looked up by name at
 
 #### Attributes
 
-| Name                        | Type    | Required | Description                                                                                                                       |
-| --------------------------- | ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `arm`                       | string  | Yes      | Name of the arm component used to move between scan poses. Must also appear in `depends_on`.                                      |
-| `camera`                    | string  | Yes      | Name of the `viam:zivid:camera` to capture from.                                                                                  |
-| `hand_eye_json`             | string  | Yes      | Path to the JSON file produced by `viam:zivid:handeye-calibration`. Provides the `flange_T_cam` transform.                        |
-| `save_dir`                  | string  | No       | Directory for scan outputs. Default: `/var/lib/viam`.                                                                             |
-| `voxel_size_mm`             | float   | No       | Voxel-grid downsample size applied to each captured cloud and to the final export. Default: `1.0`.                                |
-| `icp_enabled`               | bool    | No       | If `true`, refines pose-based alignment with local ICP after each capture. Default: `true`.                                       |
-| `icp_max_correspondence_mm` | float   | No       | Maximum correspondence distance (mm) used by the ICP solver. Default: `2.0`.                                                      |
-| `settle_delay_s`            | float   | No       | Seconds to wait after each arm move before capturing. Default: `2.0`.                                                             |
-| `save_per_pose_clouds`      | bool    | No       | If `true`, writes a binary PCD for each individual pose alongside the merged PLY. Default: `false`.                               |
-| `scan_poses`                | list    | No       | List of arm target poses (`x`, `y`, `z` in mm; `ox`, `oy`, `oz`, `theta` as OV in degrees). Required for `run_scan`.              |
+| Name                        | Type   | Required | Description                                                                                                          |
+| --------------------------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `arm`                       | string | Yes      | Name of the arm component used to move between scan poses. Must also appear in `depends_on`.                         |
+| `camera`                    | string | Yes      | Name of the `viam:zivid:camera` to capture from.                                                                     |
+| `hand_eye_json`             | string | Yes      | Path to the JSON file produced by `viam:zivid:handeye-calibration`. Provides the `flange_T_cam` transform.           |
+| `save_dir`                  | string | No       | Directory for scan outputs. Default: `/var/lib/viam`.                                                                |
+| `voxel_size_mm`             | float  | No       | Voxel-grid downsample size applied to each captured cloud and to the final export. Default: `1.0`.                   |
+| `icp_enabled`               | bool   | No       | If `true`, refines pose-based alignment with local ICP after each capture. Default: `true`.                          |
+| `icp_max_correspondence_mm` | float  | No       | Maximum correspondence distance (mm) used by the ICP solver. Default: `2.0`.                                         |
+| `settle_delay_s`            | float  | No       | Seconds to wait after each arm move before capturing. Default: `2.0`.                                                |
+| `save_per_pose_clouds`      | bool   | No       | If `true`, writes a binary PCD for each individual pose alongside the merged PLY. Default: `false`.                  |
+| `scan_poses`                | list   | No       | List of arm target poses (`x`, `y`, `z` in mm; `ox`, `oy`, `oz`, `theta` as OV in degrees). Required for `run_scan`. |
 
 #### do_command
 
@@ -528,12 +545,12 @@ This is not sufficient on its own. `ocl-icd-libopencl1` is the ICD *loader*, a d
 
 ### 2. Install a vendor ICD for your hardware
 
-| Hardware              | Package / source                                                |
-| --------------------- | --------------------------------------------------------------- |
-| Intel iGPU / CPU      | `intel-opencl-icd`                                              |
-| AMD GPU (open source) | `mesa-opencl-icd`                                               |
-| AMD GPU (ROCm)        | install ROCm runtime per AMD's documentation                    |
-| NVIDIA GPU            | install the proprietary NVIDIA driver — OpenCL ICD is bundled   |
+| Hardware              | Package / source                                              |
+| --------------------- | ------------------------------------------------------------- |
+| Intel iGPU / CPU      | `intel-opencl-icd`                                            |
+| AMD GPU (open source) | `mesa-opencl-icd`                                             |
+| AMD GPU (ROCm)        | install ROCm runtime per AMD's documentation                  |
+| NVIDIA GPU            | install the proprietary NVIDIA driver — OpenCL ICD is bundled |
 
 For example, on an Intel host:
 
