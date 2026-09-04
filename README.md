@@ -160,6 +160,16 @@ The point cloud stays fully colored at any resolution — each (now larger) poin
 
 > Note: noise removal trims floating points but can leave missing data. Per Zivid support, the more robust fix for points "skirting" a vertical surface is to angle the camera (a slight `rx`/`ry` rotation) so the projection isn't grazing the surface.
 
+#### Multiple cameras
+
+Zivid cameras are structured-light: a 3D capture floods the scene with a projected pattern. Two cameras whose fields of view overlap corrupt each other's pattern if they acquire at the same time, which shows up as noise and dropouts in the overlap region. Zivid's guidance is to [capture with one camera at a time](https://support.zivid.com/en/latest/camera/academy/camera/multi-zivid/multiple-cameras-performance-considerations.html).
+
+The module enforces this: every camera component in a module instance shares a capture lock, so only one camera projects at a time no matter how many clients read concurrently. Both 3D and 2D color captures take it, since a 2D capture also flashes the projector. Capture latency is therefore additive — polling two cameras together costs about as much as the two captures back to back. Point-cloud retrieval and encoding still overlap, and the 500 ms frame caches mean a client reading color, depth and point cloud in one cycle triggers a single capture.
+
+The lock covers one module process. Cameras driven from a separate module instance are not serialized against each other.
+
+> Set `serial_number` on every camera component when more than one Zivid is attached. Without it, components race to claim "the first available camera" and can disconnect each other.
+
 #### Image sources
 
 `get_images` returns two sources:

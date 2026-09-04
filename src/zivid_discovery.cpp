@@ -7,6 +7,8 @@
 
 #include <viam/sdk/log/logging.hpp>
 
+#include "zivid_locks.hpp"
+
 namespace viam_zivid {
 
 ZividDiscovery::ZividDiscovery(std::shared_ptr<Zivid::Application> app,
@@ -16,6 +18,10 @@ ZividDiscovery::ZividDiscovery(std::shared_ptr<Zivid::Application> app,
 
 std::vector<viam::sdk::ResourceConfig> ZividDiscovery::discover_resources(const viam::sdk::ProtoStruct& /*extra*/) {
     std::vector<viam::sdk::ResourceConfig> configs;
+
+    // Held across the whole scan: querying each camera's info/state counts as operating
+    // it, which Zivid forbids while any thread is enumerating or connecting.
+    std::lock_guard<std::mutex> device_guard(device_lock());
 
     std::vector<Zivid::Camera> cameras;
     try {
