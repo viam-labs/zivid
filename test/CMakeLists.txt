@@ -8,10 +8,15 @@ FetchContent_MakeAvailable(googletest)
 
 include(GoogleTest)
 
+# Extra sources after the first are compiled into the same test executable; the
+# executable is named after the first.
 function(zivid_add_gtest SOURCE_FILE_NAME)
     get_filename_component(TEST_EXECUTABLE_NAME ${SOURCE_FILE_NAME} NAME_WE)
 
-    add_executable(${TEST_EXECUTABLE_NAME} ${SOURCE_FILE_NAME})
+    add_executable(${TEST_EXECUTABLE_NAME} ${SOURCE_FILE_NAME} ${ARGN})
+    target_include_directories(${TEST_EXECUTABLE_NAME}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    )
     target_link_libraries(${TEST_EXECUTABLE_NAME}
         PRIVATE
             GTest::gtest
@@ -28,3 +33,4 @@ function(zivid_add_gtest SOURCE_FILE_NAME)
 endfunction()
 
 zivid_add_gtest(sanity_test.cpp)
+zivid_add_gtest(zivid_locks_test.cpp zivid_locks_other_tu.cpp)

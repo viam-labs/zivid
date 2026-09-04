@@ -20,6 +20,8 @@
 #include <viam/sdk/common/proto_value.hpp>
 #include <viam/sdk/log/logging.hpp>
 
+#include "zivid_locks.hpp"
+
 namespace viam_zivid {
 
 // Static registry definitions.
@@ -565,30 +567,35 @@ ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app, viam::sdk::Dep
     settings_ = make_settings(config);
     settings_2d_ = make_settings_2d(config);
 
-    // On reconfigure, Viam constructs the new instance before destroying the old one.
-    // Disconnect any lingering connection to the target camera so connectCamera() succeeds.
-    for (auto& cam : app_->cameras()) {
-        const bool matches = config.serial_number ? cam.info().serialNumber().value() == *config.serial_number
-                                                  : cam.state().status().value() == Zivid::CameraState::Status::ValueType::connected;
-        if (matches) {
-            try {
-                cam.disconnect();
-            } catch (...) {
-            }
-            break;
-        }
-    }
-
     const std::string target =
         config.serial_number ? "Zivid camera " + *config.serial_number : std::string{"the first available Zivid camera"};
-    try {
-        if (config.serial_number) {
-            camera_ = app_->connectCamera(Zivid::CameraInfo::SerialNumber{*config.serial_number});
-        } else {
-            camera_ = app_->connectCamera();
+
+    {
+        std::lock_guard<std::mutex> device_guard(device_lock());
+
+        // On reconfigure, Viam constructs the new instance before destroying the old one.
+        // Disconnect any lingering connection to the target camera so connectCamera() succeeds.
+        for (auto& cam : app_->cameras()) {
+            const bool matches = config.serial_number ? cam.info().serialNumber().value() == *config.serial_number
+                                                      : cam.state().status().value() == Zivid::CameraState::Status::ValueType::connected;
+            if (matches) {
+                try {
+                    cam.disconnect();
+                } catch (...) {
+                }
+                break;
+            }
         }
-    } catch (const std::exception& e) {
-        throw std::runtime_error("failed to connect to " + target + ": " + e.what());
+
+        try {
+            if (config.serial_number) {
+                camera_ = app_->connectCamera(Zivid::CameraInfo::SerialNumber{*config.serial_number});
+            } else {
+                camera_ = app_->connectCamera();
+            }
+        } catch (const std::exception& e) {
+            throw std::runtime_error("failed to connect to " + target + ": " + e.what());
+        }
     }
 
     const std::string camera_desc = describe_camera(camera_);
@@ -608,6 +615,7 @@ ZividCamera::~ZividCamera() {
         registry_.erase(name());
     }
     try {
+        std::lock_guard<std::mutex> device_guard(device_lock());
         camera_.disconnect();
     } catch (...) {
     }
@@ -643,6 +651,10 @@ Zivid::Frame ZividCamera::get_or_capture() {
     const auto capture_start = std::chrono::steady_clock::now();
     std::optional<Zivid::Frame> frame;
     try {
+        // Taken only after capture_mutex_ has been released, so that requests for this
+        // camera still coalesce onto capturing_ rather than queueing behind another
+        // camera's projector. Never acquire this while holding capture_mutex_.
+        std::lock_guard<std::mutex> projector_guard(capture_lock());
         frame = camera_.capture2D3D(settings_);
     } catch (const std::exception& e) {
         // Leaving capturing_ set would wedge every later capture on the condition variable.
@@ -698,6 +710,9 @@ Zivid::Frame2D ZividCamera::get_or_capture_2d() {
     const auto capture_start = std::chrono::steady_clock::now();
     std::optional<Zivid::Frame2D> frame;
     try {
+        // A 2D capture fires the projector as a flash whenever acquisition brightness is
+        // non-zero, so it interferes with another camera's 3D sweep just as a 3D capture does.
+        std::lock_guard<std::mutex> projector_guard(capture_lock());
         // settings_ rather than settings_2d_: get_properties() reports intrinsics scaled to
         // resolution2D(info, settings_), so capturing from the bare 2D settings can hand back
         // a different resolution and put the served image out of step with those intrinsics.
@@ -926,8 +941,14 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
 
         VIAM_RESOURCE_LOG(info) << "diagnostic capture begin (saving to " << path << ")";
         try {
-            Zivid::Frame frame = camera_.capture2D3D(diag_settings);
-            frame.save(path);
+            std::optional<Zivid::Frame> frame;
+            {
+                // Scoped tightly: saving the ZDF is slow disk I/O and must not keep
+                // another camera's capture waiting.
+                std::lock_guard<std::mutex> projector_guard(capture_lock());
+                frame = camera_.capture2D3D(diag_settings);
+            }
+            frame->save(path);
         } catch (...) {
             lock.lock();
             capturing_ = false;
@@ -981,6 +1002,7 @@ Zivid::Frame ZividCamera::capture_for_calibration() {
     VIAM_RESOURCE_LOG(info) << "calibration capture begin";
     std::optional<Zivid::Frame> frame;
     try {
+        std::lock_guard<std::mutex> projector_guard(capture_lock());
         frame = camera_.capture2D3D(settings_);
     } catch (const std::exception& e) {
         // Leaving capturing_ set would wedge every later capture on the condition variable.
