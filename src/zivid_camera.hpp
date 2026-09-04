@@ -123,7 +123,7 @@ class ZividCamera : public viam::sdk::Camera {
     // Blocks until the in-flight capture hands the camera back. Throws if that capture
     // failed, so a burst of callers does not each re-fire a capture that is failing.
     // Caller must hold capture_mutex_ through `lock`.
-    void wait_for_capture(std::unique_lock<std::mutex>& lock);
+    void wait_for_capture_in_lock(std::unique_lock<std::mutex>& lock);
 
     static constexpr std::chrono::milliseconds kFrameCacheTtl{500};
 
