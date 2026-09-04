@@ -613,7 +613,7 @@ ZividCamera::~ZividCamera() {
     }
 }
 
-void ZividCamera::wait_for_capture(std::unique_lock<std::mutex>& lock) {
+void ZividCamera::wait_for_capture_in_lock(std::unique_lock<std::mutex>& lock) {
     capture_cv_.wait(lock, [this] { return !capturing_; });
     if (last_capture_failed_) {
         throw std::runtime_error("capture failed on another thread; see the preceding error");
@@ -688,7 +688,7 @@ Zivid::Frame2D ZividCamera::get_or_capture_2d() {
         if (!capturing_) {
             break;
         }
-        wait_for_capture(lock);
+        wait_for_capture_in_lock(lock);
     }
 
     capturing_ = true;
