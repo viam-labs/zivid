@@ -189,6 +189,33 @@ To take the 2D color image with the projector fully dark, relying on ambient lig
 
 `get_point_cloud` returns a binary PCD with `x y z rgb` fields. XYZ values are in **metres**.
 
+#### Connection recovery
+
+A Zivid camera that loses its network link or its power leaves the SDK handle unusable even after
+the device comes back, and captures fail with `Cannot use the camera object for '<serial>', because
+it is not in the 'connected' state`. The camera reconnects itself, by serial, on the next request
+once the device is reachable again, so a dropout costs only the requests made while the camera was
+away rather than every request until the module is restarted.
+
+Both ends of a dropout are logged:
+
+```
+lost the connection to Zivid 2+ LR110 (serial 26179B29) (camera status: disappeared): ...
+reconnected to Zivid 2+ LR110 (serial 26179B29)
+```
+
+A request that arrives while the camera is still unreachable fails with the camera's status, which
+tells an unreachable camera apart from settings the camera rejects:
+
+```
+Zivid 2+ LR110 (serial 26179B29) is not connected and could not be reconnected
+(camera status: disappeared); check the camera's link and power rather than its settings: ...
+```
+
+Recurring dropouts are a host or cabling problem rather than a module one. Check the camera's
+network link and power supply, the host's `dmesg`, and the temperatures in
+[`get_camera_state`](#get_camera_state).
+
 #### do_command
 
 ##### `get_camera_state`

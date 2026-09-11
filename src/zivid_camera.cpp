@@ -10,6 +10,7 @@
 
 #include <Zivid/CameraInfo.h>
 #include <Zivid/CameraIntrinsics.h>
+#include <Zivid/CameraState.h>
 #include <Zivid/Experimental/Calibration.h>
 #include <Zivid/Experimental/SettingsInfo.h>
 #include <Zivid/Image.h>
@@ -381,6 +382,26 @@ std::string describe_camera(const Zivid::Camera& camera) {
     }
 }
 
+// Reads the camera's connection status. Best effort like describe_camera(): std::nullopt means
+// the status could not be read at all, which is itself a sign the camera is unreachable.
+std::optional<Zivid::CameraState::Status> camera_status(const Zivid::Camera& camera) {
+    try {
+        return camera.state().status();
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+bool is_connected(const Zivid::Camera& camera) {
+    const auto status = camera_status(camera);
+    return status && status->value() == Zivid::CameraState::Status::ValueType::connected;
+}
+
+// Names a status for an operator-facing message, e.g. "connected", "disappeared".
+std::string status_name(const std::optional<Zivid::CameraState::Status>& status) {
+    return status ? status->toString() : std::string{"unreadable"};
+}
+
 // Maps a config string to a Zivid pixel-sampling value. Both the 3D
 // (Zivid::Settings::Sampling::Pixel) and 2D (Zivid::Settings2D::Sampling::Pixel)
 // enums share the same member names, so this templates over the ValueType.
@@ -583,18 +604,19 @@ ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app, viam::sdk::Dep
         config.serial_number ? "Zivid camera " + *config.serial_number : std::string{"the first available Zivid camera"};
     try {
         if (config.serial_number) {
-            camera_ = app_->connectCamera(Zivid::CameraInfo::SerialNumber{*config.serial_number});
+            camera_ = std::make_shared<Zivid::Camera>(app_->connectCamera(Zivid::CameraInfo::SerialNumber{*config.serial_number}));
         } else {
-            camera_ = app_->connectCamera();
+            camera_ = std::make_shared<Zivid::Camera>(app_->connectCamera());
         }
     } catch (const std::exception& e) {
         throw std::runtime_error("failed to connect to " + target + ": " + e.what());
     }
 
-    const std::string camera_desc = describe_camera(camera_);
+    const std::string camera_desc = describe_camera(*camera_);
     VIAM_RESOURCE_LOG(info) << "connected to " << camera_desc;
 
-    const auto cam_info = camera_.info();
+    const auto cam_info = camera_->info();
+    serial_ = cam_info.serialNumber().value();
     check_acquisitions_against_camera<Zivid::Settings::Acquisition>(config.acquisitions, cam_info, "acquisitions", camera_desc);
     check_acquisitions_against_camera<Zivid::Settings2D::Acquisition>(config.acquisitions_2d, cam_info, "acquisitions_2d", camera_desc);
 
@@ -608,7 +630,7 @@ ZividCamera::~ZividCamera() {
         registry_.erase(name());
     }
     try {
-        camera_.disconnect();
+        camera_->disconnect();
     } catch (...) {
     }
 }
@@ -618,6 +640,90 @@ void ZividCamera::wait_for_capture_in_lock(std::unique_lock<std::mutex>& lock) {
     if (last_capture_failed_) {
         throw std::runtime_error("capture failed on another thread; see the preceding error");
     }
+}
+
+std::shared_ptr<Zivid::Camera> ZividCamera::camera_handle() const {
+    std::lock_guard<std::mutex> lk(camera_mutex_);
+    return camera_;
+}
+
+void ZividCamera::reconnect() {
+    std::lock_guard<std::mutex> lk(reconnect_mutex_);
+
+    // Another request may have restored the connection while this one waited for the lock.
+    if (is_connected(*camera_handle())) {
+        return;
+    }
+
+    // Enumerating refreshes the SDK's view of the bus, so a camera that has just reappeared is
+    // visible to connectCamera() below, and it drops the stale connection a dead link leaves
+    // behind, which connectCamera() would otherwise refuse. A camera that cannot even report
+    // its serial is skipped rather than failing the reconnect.
+    for (auto& cam : app_->cameras()) {
+        try {
+            if (cam.info().serialNumber().value() == serial_) {
+                cam.disconnect();
+                break;
+            }
+        } catch (...) {
+        }
+    }
+
+    // By serial rather than "first available", so a machine with several Zivid cameras cannot
+    // silently reconnect this component to a different one.
+    auto fresh = std::make_shared<Zivid::Camera>(app_->connectCamera(Zivid::CameraInfo::SerialNumber{serial_}));
+    {
+        std::lock_guard<std::mutex> camera_lk(camera_mutex_);
+        camera_ = fresh;
+        connection_lost_ = false;
+    }
+    VIAM_RESOURCE_LOG(info) << "reconnected to " << describe_camera(*fresh);
+}
+
+bool ZividCamera::recover_lost_connection(const std::exception& error) {
+    const auto camera = camera_handle();
+    const auto status = camera_status(*camera);
+    if (status && status->value() == Zivid::CameraState::Status::ValueType::connected) {
+        return false;
+    }
+
+    bool first_report = false;
+    {
+        std::lock_guard<std::mutex> lk(camera_mutex_);
+        first_report = !connection_lost_;
+        connection_lost_ = true;
+    }
+    if (first_report) {
+        VIAM_RESOURCE_LOG(warn) << "lost the connection to " << describe_camera(*camera) << " (camera status: " << status_name(status)
+                                << "): " << error.what();
+    }
+
+    try {
+        reconnect();
+    } catch (const std::exception& e) {
+        VIAM_RESOURCE_LOG(warn) << "could not reconnect to Zivid camera " << serial_ << ": " << e.what();
+        return false;
+    }
+    return true;
+}
+
+std::string ZividCamera::failure_message(const std::exception& error, const std::string& rejected_what) {
+    const auto camera = camera_handle();
+    const auto status = camera_status(*camera);
+    if (!status || status->value() != Zivid::CameraState::Status::ValueType::connected) {
+        return describe_camera(*camera) + " is not connected and could not be reconnected (camera status: " + status_name(status) +
+               "); check the camera's link and power rather than its settings: " + error.what();
+    }
+    return describe_camera(*camera) + " rejected the configured " + rejected_what + ": " + error.what();
+}
+
+void ZividCamera::release_failed_capture() {
+    {
+        std::lock_guard<std::mutex> lk(capture_mutex_);
+        capturing_ = false;
+        last_capture_failed_ = true;
+    }
+    capture_cv_.notify_all();
 }
 
 Zivid::Frame ZividCamera::get_or_capture() {
@@ -643,15 +749,10 @@ Zivid::Frame ZividCamera::get_or_capture() {
     const auto capture_start = std::chrono::steady_clock::now();
     std::optional<Zivid::Frame> frame;
     try {
-        frame = camera_.capture2D3D(settings_);
+        frame = with_reconnect([this] { return camera_handle()->capture2D3D(settings_); });
     } catch (const std::exception& e) {
-        // Leaving capturing_ set would wedge every later capture on the condition variable.
-        lock.lock();
-        capturing_ = false;
-        last_capture_failed_ = true;
-        lock.unlock();
-        capture_cv_.notify_all();
-        throw std::runtime_error(describe_camera(camera_) + " rejected the configured capture settings: " + e.what());
+        release_failed_capture();
+        throw std::runtime_error(failure_message(e, "capture settings"));
     }
     const auto capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - capture_start).count();
     VIAM_RESOURCE_LOG(info) << "capture end (" << capture_ms << " ms)";
@@ -701,14 +802,10 @@ Zivid::Frame2D ZividCamera::get_or_capture_2d() {
         // settings_ rather than settings_2d_: get_properties() reports intrinsics scaled to
         // resolution2D(info, settings_), so capturing from the bare 2D settings can hand back
         // a different resolution and put the served image out of step with those intrinsics.
-        frame = camera_.capture2D(settings_);
+        frame = with_reconnect([this] { return camera_handle()->capture2D(settings_); });
     } catch (const std::exception& e) {
-        lock.lock();
-        capturing_ = false;
-        last_capture_failed_ = true;
-        lock.unlock();
-        capture_cv_.notify_all();
-        throw std::runtime_error(describe_camera(camera_) + " rejected the configured 2D color capture settings: " + e.what());
+        release_failed_capture();
+        throw std::runtime_error(failure_message(e, "2D color capture settings"));
     }
     const auto capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - capture_start).count();
     VIAM_RESOURCE_LOG(info) << "2D capture end (" << capture_ms << " ms)";
@@ -785,53 +882,59 @@ viam::sdk::Camera::point_cloud ZividCamera::get_point_cloud(std::string /*mime_t
 }
 
 viam::sdk::Camera::properties ZividCamera::get_properties() {
-    // The intrinsics MUST correspond to the 2D color image that get_images() serves, so they
-    // are derived from the same 2D settings the capture uses.
-    //
-    // This is also the first point at which the config-derived 2D settings are checked against
-    // the connected camera model, so a value this model does not support surfaces here rather
-    // than while parsing.
     try {
-        const auto info = camera_.info();
-        const auto base = Zivid::Experimental::Calibration::intrinsics(camera_, settings_2d_);
-        const auto base_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_2d_);
-        const auto color_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_);
-
-        const double sx = static_cast<double>(color_res.width()) / base_res.width();
-        const double sy = static_cast<double>(color_res.height()) / base_res.height();
-
-        VIAM_RESOURCE_LOG(debug) << "[get_properties] base_res " << base_res.width() << "x" << base_res.height() << ", served color_res "
-                                 << color_res.width() << "x" << color_res.height() << ", scale " << sx << "x" << sy;
-
-        viam::sdk::Camera::properties props{};
-        props.supports_pcd = true;
-
-        const auto& cm = base.cameraMatrix();
-        props.intrinsic_parameters.width_px = static_cast<int>(color_res.width());
-        props.intrinsic_parameters.height_px = static_cast<int>(color_res.height());
-        props.intrinsic_parameters.focal_x_px = cm.fx().value() * sx;
-        props.intrinsic_parameters.focal_y_px = cm.fy().value() * sy;
-        props.intrinsic_parameters.center_x_px = cm.cx().value() * sx;
-        props.intrinsic_parameters.center_y_px = cm.cy().value() * sy;
-
-        // RDK's BrownConrady contract is [k1, k2, k3, p1, p2] (radial first, then tangential).
-        const auto& dist = base.distortion();
-        props.distortion_parameters.model = "brown_conrady";
-        props.distortion_parameters.parameters =
-            std::vector<double>{dist.k1().value(), dist.k2().value(), dist.k3().value(), dist.p1().value(), dist.p2().value()};
-
-        props.mime_types = {"image/jpeg", "image/vnd.viam.dep"};
-        props.frame_rate = 0.f;  // on-demand capture; no fixed frame rate
-
-        return props;
+        return with_reconnect([this] { return compute_properties(*camera_handle()); });
     } catch (const std::exception& e) {
-        const std::string camera_desc = describe_camera(camera_);
-        VIAM_RESOURCE_LOG(error) << "2D color settings rejected by " << camera_desc << ":\n" << settings_2d_.toString();
-        throw std::runtime_error(camera_desc +
-                                 " rejected the configured 2D color settings while computing intrinsics; check acquisitions_2d and "
-                                 "color_pixel_sampling against this camera model: " +
-                                 e.what());
+        const auto camera = camera_handle();
+        // The dump explains a rejection, so it would only mislead when the camera is unreachable.
+        if (is_connected(*camera)) {
+            VIAM_RESOURCE_LOG(error) << "2D color settings rejected by " << describe_camera(*camera) << ":\n" << settings_2d_.toString();
+        }
+        throw std::runtime_error(failure_message(e,
+                                                 "2D color settings while computing intrinsics; check acquisitions_2d and "
+                                                 "color_pixel_sampling against this camera model"));
     }
+}
+
+// The intrinsics MUST correspond to the 2D color image that get_images() serves, so they
+// are derived from the same 2D settings the capture uses.
+//
+// This is also the first point at which the config-derived 2D settings are checked against
+// the connected camera model, so a value this model does not support surfaces here rather
+// than while parsing.
+viam::sdk::Camera::properties ZividCamera::compute_properties(const Zivid::Camera& camera) {
+    const auto info = camera.info();
+    const auto base = Zivid::Experimental::Calibration::intrinsics(camera, settings_2d_);
+    const auto base_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_2d_);
+    const auto color_res = Zivid::Experimental::SettingsInfo::resolution2D(info, settings_);
+
+    const double sx = static_cast<double>(color_res.width()) / base_res.width();
+    const double sy = static_cast<double>(color_res.height()) / base_res.height();
+
+    VIAM_RESOURCE_LOG(debug) << "[get_properties] base_res " << base_res.width() << "x" << base_res.height() << ", served color_res "
+                             << color_res.width() << "x" << color_res.height() << ", scale " << sx << "x" << sy;
+
+    viam::sdk::Camera::properties props{};
+    props.supports_pcd = true;
+
+    const auto& cm = base.cameraMatrix();
+    props.intrinsic_parameters.width_px = static_cast<int>(color_res.width());
+    props.intrinsic_parameters.height_px = static_cast<int>(color_res.height());
+    props.intrinsic_parameters.focal_x_px = cm.fx().value() * sx;
+    props.intrinsic_parameters.focal_y_px = cm.fy().value() * sy;
+    props.intrinsic_parameters.center_x_px = cm.cx().value() * sx;
+    props.intrinsic_parameters.center_y_px = cm.cy().value() * sy;
+
+    // RDK's BrownConrady contract is [k1, k2, k3, p1, p2] (radial first, then tangential).
+    const auto& dist = base.distortion();
+    props.distortion_parameters.model = "brown_conrady";
+    props.distortion_parameters.parameters =
+        std::vector<double>{dist.k1().value(), dist.k2().value(), dist.k3().value(), dist.p1().value(), dist.p2().value()};
+
+    props.mime_types = {"image/jpeg", "image/vnd.viam.dep"};
+    props.frame_rate = 0.f;  // on-demand capture; no fixed frame rate
+
+    return props;
 }
 
 std::vector<viam::sdk::GeometryConfig> ZividCamera::get_geometries(const viam::sdk::ProtoStruct& /*extra*/) {
@@ -847,7 +950,7 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
     const auto& cmd = typed_value<std::string>(it->second, "DoCommand field 'command'");
 
     if (cmd == "get_acquisition_ranges") {
-        const auto info = camera_.info();
+        const auto info = camera_handle()->info();
         namespace SI = Zivid::Experimental::SettingsInfo;
 
         auto make_range_struct = [](double min, double max) {
@@ -892,7 +995,7 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
     }
 
     if (cmd == "get_network_configuration") {
-        const auto net = camera_.networkConfiguration();
+        const auto net = camera_handle()->networkConfiguration();
         const auto& ipv4 = net.ipv4();
 
         viam::sdk::ProtoStruct ipv4_struct;
@@ -913,7 +1016,7 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
         } else {
             const auto ts =
                 std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-            path = "/var/lib/viam/zivid_diagnostic_" + camera_.info().serialNumber().value() + "_" + std::to_string(ts) + ".zdf";
+            path = "/var/lib/viam/zivid_diagnostic_" + serial_ + "_" + std::to_string(ts) + ".zdf";
         }
 
         Zivid::Settings diag_settings = settings_;
@@ -926,13 +1029,15 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
 
         VIAM_RESOURCE_LOG(info) << "diagnostic capture begin (saving to " << path << ")";
         try {
-            Zivid::Frame frame = camera_.capture2D3D(diag_settings);
-            frame.save(path);
+            with_reconnect([this, &diag_settings, &path] {
+                Zivid::Frame frame = camera_handle()->capture2D3D(diag_settings);
+                frame.save(path);
+            });
+        } catch (const std::exception& e) {
+            release_failed_capture();
+            throw std::runtime_error(failure_message(e, "diagnostic capture settings"));
         } catch (...) {
-            lock.lock();
-            capturing_ = false;
-            last_capture_failed_ = true;
-            capture_cv_.notify_all();
+            release_failed_capture();
             throw;
         }
         VIAM_RESOURCE_LOG(info) << "diagnostic capture saved";
@@ -948,7 +1053,7 @@ viam::sdk::ProtoStruct ZividCamera::do_command(const viam::sdk::ProtoStruct& com
     }
 
     if (cmd == "get_camera_state") {
-        const auto state = camera_.state();
+        const auto state = camera_handle()->state();
 
         viam::sdk::ProtoStruct temp;
         temp["dmd"] = state.temperature().dmd().value();
@@ -981,15 +1086,10 @@ Zivid::Frame ZividCamera::capture_for_calibration() {
     VIAM_RESOURCE_LOG(info) << "calibration capture begin";
     std::optional<Zivid::Frame> frame;
     try {
-        frame = camera_.capture2D3D(settings_);
+        frame = with_reconnect([this] { return camera_handle()->capture2D3D(settings_); });
     } catch (const std::exception& e) {
-        // Leaving capturing_ set would wedge every later capture on the condition variable.
-        lock.lock();
-        capturing_ = false;
-        last_capture_failed_ = true;
-        lock.unlock();
-        capture_cv_.notify_all();
-        throw std::runtime_error(describe_camera(camera_) + " rejected the configured capture settings: " + e.what());
+        release_failed_capture();
+        throw std::runtime_error(failure_message(e, "capture settings"));
     }
     VIAM_RESOURCE_LOG(info) << "calibration capture end";
 
@@ -1003,12 +1103,12 @@ Zivid::Frame ZividCamera::capture_for_calibration() {
 }
 
 std::string ZividCamera::serial_number() const {
-    return camera_.info().serialNumber().value();
+    return serial_;
 }
 
 viam::sdk::ProtoStruct ZividCamera::get_status() {
     viam::sdk::ProtoStruct status;
-    const auto state = camera_.state();
+    const auto state = camera_handle()->state();
     status["status"] = state.toString();
     return status;
 }
