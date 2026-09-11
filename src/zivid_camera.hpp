@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -125,10 +126,67 @@ class ZividCamera : public viam::sdk::Camera {
     // Caller must hold capture_mutex_ through `lock`.
     void wait_for_capture_in_lock(std::unique_lock<std::mutex>& lock);
 
+    // Runs `operation`, and if it failed because the camera had dropped its connection,
+    // reconnects and runs it once more. A camera that loses its link or its power leaves the
+    // SDK handle unusable even after the device comes back, so without this a momentary
+    // dropout fails every later request until the module is restarted.
+    //
+    // Rethrows the original error when the failure was not a lost connection, and the retry's
+    // error when the retry failed too.
+    template <typename Operation>
+    auto with_reconnect(Operation&& operation) -> decltype(operation()) {
+        try {
+            return operation();
+        } catch (const std::exception& first_error) {
+            if (!recover_lost_connection(first_error)) {
+                throw;
+            }
+            return operation();
+        }
+    }
+
+    // Returns the camera handle to work through. Recovering from a dropout installs a fresh
+    // handle, so callers take a copy of the pointer under camera_mutex_ rather than reading
+    // camera_ directly while another request replaces it.
+    std::shared_ptr<Zivid::Camera> camera_handle() const;
+
+    // Reconnects to serial_ after a dropout. Safe to call from any request: it serializes on
+    // reconnect_mutex_ and returns early when another request already restored the connection.
+    void reconnect();
+
+    // Called when a camera operation threw. Returns true if the camera had lost its connection
+    // and it has been restored, meaning the caller should retry the operation once; false when
+    // the camera is still connected and the failure was therefore not a connection problem.
+    bool recover_lost_connection(const std::exception& error);
+
+    // Operator-facing message for a failed camera operation, distinguishing a camera that is no
+    // longer connected from one that rejects the configured settings. The two call for
+    // completely different responses, and the SDK reports both as a plain exception.
+    std::string failure_message(const std::exception& error, const std::string& rejected_what);
+
+    // Releases the capture slot held by this thread after a failure and wakes any waiters.
+    // Leaving capturing_ set would wedge every later capture on the condition variable.
+    void release_failed_capture();
+
+    // Computes the served properties from `camera`. Split out of get_properties() so that a
+    // lost connection can be retried after reconnecting.
+    viam::sdk::Camera::properties compute_properties(const Zivid::Camera& camera);
+
     static constexpr std::chrono::milliseconds kFrameCacheTtl{500};
 
     std::shared_ptr<Zivid::Application> app_;
-    Zivid::Camera camera_;
+    // Guarded by camera_mutex_: dropout recovery installs a fresh handle while other requests
+    // may still be working through the old one.
+    std::shared_ptr<Zivid::Camera> camera_;
+    mutable std::mutex camera_mutex_;
+    // Serializes dropout recovery so a burst of failing requests reconnects once, not once each.
+    std::mutex reconnect_mutex_;
+    // Cached at construction: a dropout makes info() itself fail, and reconnecting needs the
+    // serial precisely when the camera is unreachable.
+    std::string serial_;
+    // Whether the loss of connection has already been logged, so a dropout is reported once
+    // rather than on every failing request. Guarded by camera_mutex_.
+    bool connection_lost_{false};
     Zivid::Settings settings_;
     // The 2D color settings embedded in settings_, kept separately so
     // get_properties() can compute (capture-free) the base intrinsics + base
