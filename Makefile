@@ -36,6 +36,8 @@ build:
 		--output-folder=$(CONAN_OUTPUT) \
 		--build=missing \
 		--build="b2/*" \
+		--build="abseil/*" \
+		--build="re2/*" \
 		$(CONAN_FLAGS)
 	test -f ./venv/bin/activate && . ./venv/bin/activate; \
 	cmake --preset conan-release
@@ -62,6 +64,8 @@ conan-install-test:
 		--output-folder=$(CONAN_OUTPUT) \
 		--build=missing \
 		--build="b2/*" \
+		--build="abseil/*" \
+		--build="re2/*" \
 		-o "&:with_tests=True" \
 		$(CONAN_FLAGS)
 
