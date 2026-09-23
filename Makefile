@@ -34,8 +34,11 @@ build:
 	. ./venv/bin/activate; \
 	conan install . \
 		--output-folder=$(CONAN_OUTPUT) \
-		--build="*" \
-		--build="~cmake/*" \
+		--build=missing \
+		--build="b2/*" \
+		--build="abseil/*" \
+		--build="re2/*" \
+		--build="openssl/*" \
 		$(CONAN_FLAGS)
 	test -f ./venv/bin/activate && . ./venv/bin/activate; \
 	cmake --preset conan-release
@@ -60,8 +63,11 @@ conan-install-test:
 	. ./venv/bin/activate; \
 	conan install . \
 		--output-folder=$(CONAN_OUTPUT) \
-		--build="*" \
-		--build="~cmake/*" \
+		--build=missing \
+		--build="b2/*" \
+		--build="abseil/*" \
+		--build="re2/*" \
+		--build="openssl/*" \
 		-o "&:with_tests=True" \
 		$(CONAN_FLAGS)
 
