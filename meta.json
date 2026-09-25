@@ -1,7 +1,7 @@
 {
   "$schema": "https://dl.viam.dev/module.schema.json",
   "module_id": "viam:zivid",
-  "visibility": "public_unlisted",
+  "visibility": "public",
   "url": "https://github.com/viam-labs/zivid",
   "description": "Viam module for Zivid 3D cameras",
   "models": [
