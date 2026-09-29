@@ -128,7 +128,7 @@ All coordinates are in **millimetres** relative to the **camera frame**.
 
 #### Processing filters
 
-Maps to `Zivid::Settings::Processing::Filters`. Only the noise removal filter is exposed today.
+Maps to `Zivid::Settings::Processing::Filters`. Noise removal, reflection removal and contrast distortion are exposed; any field left out keeps the camera's SDK default.
 
 **Noise removal** — discards low-confidence points. Raising the threshold removes more noisy/floating points at the cost of leaving holes (missing data); lowering it keeps more data. This is the same control as the "Noise → Removal → Threshold" slider in Zivid Studio. If omitted, the camera's SDK default is used (enabled, threshold ≈ 7).
 
@@ -140,6 +140,40 @@ Maps to `Zivid::Settings::Processing::Filters`. Only the noise removal filter is
   }
 }
 ```
+
+**Reflection removal** — see Zivid's [Reflection Filter](https://support.zivid.com/reference-articles/settings/processing-settings/reflection-filter.html) docs.
+
+```json
+"processing": {
+  "reflection_removal": {
+    "enabled": true,
+    "mode": "global"
+  }
+}
+```
+
+| Name      | Type   | Required | Description                         |
+| --------- | ------ | -------- | ----------------------------------- |
+| `enabled` | bool   | No       | Enable/disable reflection removal.  |
+| `mode`    | string | No       | `global` or `local`.                |
+
+**Contrast distortion** — see Zivid's [Contrast Distortion Filter](https://support.zivid.com/en/latest/reference-articles/settings/processing-settings/contrast-distortion-filter.html) docs.
+
+```json
+"processing": {
+  "contrast_distortion": {
+    "correction": { "enabled": true, "strength": 0.4 },
+    "removal": { "enabled": false, "threshold": 0.5 }
+  }
+}
+```
+
+| Name                   | Type  | Required | Description                                                    |
+| ---------------------- | ----- | -------- | -------------------------------------------------------------- |
+| `correction.enabled`   | bool  | No       | Enable/disable correction.                                     |
+| `correction.strength`  | float | No       | 0.0–1.0. Higher corrects more.                                 |
+| `removal.enabled`      | bool  | No       | Enable/disable removal of strongly corrected points.           |
+| `removal.threshold`    | float | No       | 0.0–1.0. Higher removes more points.                           |
 
 #### Resolution and capture time
 

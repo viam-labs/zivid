@@ -504,6 +504,41 @@ Zivid::Settings make_settings(const Config& config) {
                 NoiseRemoval::Threshold{checked_value<NoiseRemoval::Threshold>(*nr.threshold, "processing.noise_removal.threshold")});
     }
 
+    if (config.processing && config.processing->reflection_removal) {
+        const auto& rr = *config.processing->reflection_removal;
+        using ReflectionRemoval = Zivid::Settings::Processing::Filters::Reflection::Removal;
+        if (rr.enabled)
+            settings.set(ReflectionRemoval::Enabled{*rr.enabled});
+        if (rr.mode) {
+            if (*rr.mode == "global")
+                settings.set(ReflectionRemoval::Mode::global);
+            else if (*rr.mode == "local")
+                settings.set(ReflectionRemoval::Mode::local);
+            else
+                throw std::invalid_argument(attr_desc("processing.reflection_removal.mode") + " '" + *rr.mode +
+                                            "' is invalid. Valid values: global, local.");
+        }
+    }
+
+    if (config.processing && config.processing->contrast_distortion) {
+        const auto& cd = *config.processing->contrast_distortion;
+        using ContrastDistortion = Zivid::Settings::Processing::Filters::Experimental::ContrastDistortion;
+        if (cd.correction) {
+            if (cd.correction->enabled)
+                settings.set(ContrastDistortion::Correction::Enabled{*cd.correction->enabled});
+            if (cd.correction->value)
+                settings.set(ContrastDistortion::Correction::Strength{checked_value<ContrastDistortion::Correction::Strength>(
+                    *cd.correction->value, "processing.contrast_distortion.correction.strength")});
+        }
+        if (cd.removal) {
+            if (cd.removal->enabled)
+                settings.set(ContrastDistortion::Removal::Enabled{*cd.removal->enabled});
+            if (cd.removal->value)
+                settings.set(ContrastDistortion::Removal::Threshold{checked_value<ContrastDistortion::Removal::Threshold>(
+                    *cd.removal->value, "processing.contrast_distortion.removal.threshold")});
+        }
+    }
+
     return settings;
 }
 
@@ -572,6 +607,21 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
 
         if (const auto nr = proc->object("noise_removal")) {
             pc.noise_removal = NoiseRemovalConfig{nr->get<bool>("enabled"), nr->get<double>("threshold")};
+        }
+
+        if (const auto rr = proc->object("reflection_removal")) {
+            pc.reflection_removal = ReflectionRemovalConfig{rr->get<bool>("enabled"), rr->get<std::string>("mode")};
+        }
+
+        if (const auto cd = proc->object("contrast_distortion")) {
+            ContrastDistortionConfig cdc;
+            if (const auto c = cd->object("correction")) {
+                cdc.correction = ContrastDistortionConfig::Stage{c->get<bool>("enabled"), c->get<double>("strength")};
+            }
+            if (const auto r = cd->object("removal")) {
+                cdc.removal = ContrastDistortionConfig::Stage{r->get<bool>("enabled"), r->get<double>("threshold")};
+            }
+            pc.contrast_distortion = cdc;
         }
 
         result.processing = pc;
