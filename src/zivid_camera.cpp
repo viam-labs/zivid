@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 
@@ -392,6 +393,46 @@ std::optional<Zivid::CameraState::Status> camera_status(const Zivid::Camera& cam
     }
 }
 
+long long ms_since(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+}
+
+// The SDK's own timing and compute device for a completed frame. CaptureTime minus
+// AcquisitionTime is the camera-to-host transfer plus point cloud processing, which the
+// capture call does not wait for. Best effort, like describe_camera().
+std::string describe_frame_timing(const Zivid::Frame& frame) {
+    try {
+        const auto info = frame.info();
+        const auto& metrics = info.metrics();
+        const auto ms = [](const auto& value) { return std::to_string(value.value().count() / 1000) + " ms"; };
+        const auto& device = info.systemInfo().computeDevice();
+        return "SDK acquisition " + ms(metrics.acquisitionTime()) + ", capture " + ms(metrics.captureTime()) + ", throttling " +
+               ms(metrics.throttlingTime()) + "; compute device " + device.vendor().value() + " " + device.model().value();
+    } catch (const std::exception& e) {
+        return std::string{"frame timing unavailable: "} + e.what();
+    }
+}
+
+// Link speeds bounding the camera-to-host transfer. The SDK reports only the camera's link to the
+// next network device, so each host interface that discovered the camera is read from the kernel;
+// the end-to-end rate is the slowest hop. Best effort, like describe_camera().
+std::string describe_network(const Zivid::Camera& camera) {
+    try {
+        const auto network = camera.state().network();
+        std::string out = "camera link " + network.ethernet().linkSpeed().toString();
+        const auto& interfaces = network.localInterfaces();
+        for (size_t i = 0; i < interfaces.size(); ++i) {
+            const auto name = interfaces.at(i).interfaceName().value();
+            std::ifstream speed_file("/sys/class/net/" + name + "/speed");
+            std::string mbps;
+            out += ", host " + name + " " + ((speed_file >> mbps) ? mbps + " Mb/s" : std::string{"speed unknown"});
+        }
+        return out;
+    } catch (const std::exception& e) {
+        return std::string{"network state unavailable: "} + e.what();
+    }
+}
+
 bool is_connected(const Zivid::Camera& camera) {
     const auto status = camera_status(camera);
     return status && status->value() == Zivid::CameraState::Status::ValueType::connected;
@@ -613,7 +654,7 @@ ZividCamera::ZividCamera(std::shared_ptr<Zivid::Application> app, viam::sdk::Dep
     }
 
     const std::string camera_desc = describe_camera(*camera_);
-    VIAM_RESOURCE_LOG(info) << "connected to " << camera_desc;
+    VIAM_RESOURCE_LOG(info) << "connected to " << camera_desc << "; " << describe_network(*camera_);
 
     const auto cam_info = camera_->info();
     serial_ = cam_info.serialNumber().value();
@@ -677,7 +718,7 @@ void ZividCamera::reconnect() {
         camera_ = fresh;
         connection_lost_ = false;
     }
-    VIAM_RESOURCE_LOG(info) << "reconnected to " << describe_camera(*fresh);
+    VIAM_RESOURCE_LOG(info) << "reconnected to " << describe_camera(*fresh) << "; " << describe_network(*fresh);
 }
 
 bool ZividCamera::recover_lost_connection(const std::exception& error) {
@@ -856,10 +897,17 @@ viam::sdk::Camera::image_collection ZividCamera::get_images(std::vector<std::str
         result.images.push_back(encode_color_image(*opt_frame2d));
     }
 
+    const auto wait_start = std::chrono::steady_clock::now();
     const auto pc = frame.pointCloud();
+    const auto wait_ms = ms_since(wait_start);
+    const auto copy_start = std::chrono::steady_clock::now();
     const auto xyz = pc.copyPointsXYZ();
+    const auto copy_ms = ms_since(copy_start);
+    const auto encode_start = std::chrono::steady_clock::now();
     auto dm = build_depth_map(xyz, pc.width(), pc.height());
     auto encoded = viam::sdk::Camera::encode_depth_map(dm);
+    VIAM_RESOURCE_LOG(info) << "depth image ready: waited " << wait_ms << " ms for transfer and processing, copied in " << copy_ms
+                            << " ms, encoded in " << ms_since(encode_start) << " ms; " << describe_frame_timing(frame);
 
     viam::sdk::Camera::raw_image depth_raw;
     depth_raw.mime_type = "image/vnd.viam.dep";
@@ -872,12 +920,20 @@ viam::sdk::Camera::image_collection ZividCamera::get_images(std::vector<std::str
 
 viam::sdk::Camera::point_cloud ZividCamera::get_point_cloud(std::string /*mime_type*/, const viam::sdk::ProtoStruct& /*extra*/) {
     auto frame = get_or_capture();
+    const auto wait_start = std::chrono::steady_clock::now();
     const auto pc = frame.pointCloud();
+    const auto wait_ms = ms_since(wait_start);
+    const auto copy_start = std::chrono::steady_clock::now();
     const auto points = pc.copyPointsXYZColorsRGBA();
+    const auto copy_ms = ms_since(copy_start);
 
     viam::sdk::Camera::point_cloud result;
     result.mime_type = "pointcloud/pcd";
+    const auto encode_start = std::chrono::steady_clock::now();
     result.pc = encode_pcd(points);
+    VIAM_RESOURCE_LOG(info) << "point cloud ready: waited " << wait_ms << " ms for transfer and processing, copied in " << copy_ms
+                            << " ms, encoded " << result.pc.size() / 1000000.0 << " MB in " << ms_since(encode_start) << " ms; "
+                            << describe_frame_timing(frame);
     return result;
 }
 
