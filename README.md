@@ -141,7 +141,7 @@ Maps to `Zivid::Settings::Processing::Filters`. Noise removal, reflection remova
 }
 ```
 
-**Reflection removal** — discards points introduced by light bouncing between surfaces, which is common on shiny materials. `global` mode generally removes more outliers and keeps more coverage on shiny dark objects; `local` preserves thin features far from the background, and Zivid advises pairing it with the cluster filter. See [Reflection Filter](https://support.zivid.com/reference-articles/settings/processing-settings/reflection-filter.html).
+**Reflection removal** — see Zivid's [Reflection Filter](https://support.zivid.com/reference-articles/settings/processing-settings/reflection-filter.html) docs.
 
 ```json
 "processing": {
@@ -157,7 +157,7 @@ Maps to `Zivid::Settings::Processing::Filters`. Noise removal, reflection remova
 | `enabled` | bool   | No       | Enable/disable reflection removal.  |
 | `mode`    | string | No       | `global` or `local`.                |
 
-**Contrast distortion** — corrects false ripples and bumps where the image goes abruptly from bright to dark (e.g. a highlight on a dark surface), caused by blur in the lens. Correction moves affected points back toward the true surface; removal additionally drops points whose correction exceeds the threshold. It works best when the aperture keeps the scene in good focus. See [Contrast Distortion Filter](https://support.zivid.com/en/latest/reference-articles/settings/processing-settings/contrast-distortion-filter.html). This is an experimental filter in the Zivid SDK (`Filters::Experimental::ContrastDistortion`).
+**Contrast distortion** — see Zivid's [Contrast Distortion Filter](https://support.zivid.com/en/latest/reference-articles/settings/processing-settings/contrast-distortion-filter.html) docs.
 
 ```json
 "processing": {
