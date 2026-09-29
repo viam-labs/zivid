@@ -906,8 +906,8 @@ viam::sdk::Camera::image_collection ZividCamera::get_images(std::vector<std::str
     const auto encode_start = std::chrono::steady_clock::now();
     auto dm = build_depth_map(xyz, pc.width(), pc.height());
     auto encoded = viam::sdk::Camera::encode_depth_map(dm);
-    VIAM_RESOURCE_LOG(info) << "depth image ready: waited " << wait_ms << " ms for transfer and processing, copied in " << copy_ms
-                            << " ms, encoded in " << ms_since(encode_start) << " ms; " << describe_frame_timing(frame);
+    VIAM_RESOURCE_LOG(debug) << "depth image ready: waited " << wait_ms << " ms for transfer and processing, copied in " << copy_ms
+                             << " ms, encoded in " << ms_since(encode_start) << " ms; " << describe_frame_timing(frame);
 
     viam::sdk::Camera::raw_image depth_raw;
     depth_raw.mime_type = "image/vnd.viam.dep";
@@ -931,9 +931,9 @@ viam::sdk::Camera::point_cloud ZividCamera::get_point_cloud(std::string /*mime_t
     result.mime_type = "pointcloud/pcd";
     const auto encode_start = std::chrono::steady_clock::now();
     result.pc = encode_pcd(points);
-    VIAM_RESOURCE_LOG(info) << "point cloud ready: waited " << wait_ms << " ms for transfer and processing, copied in " << copy_ms
-                            << " ms, encoded " << result.pc.size() / 1000000.0 << " MB in " << ms_since(encode_start) << " ms; "
-                            << describe_frame_timing(frame);
+    VIAM_RESOURCE_LOG(debug) << "point cloud ready: waited " << wait_ms << " ms for transfer and processing, copied in " << copy_ms
+                             << " ms, encoded " << result.pc.size() / 1000000.0 << " MB in " << ms_since(encode_start) << " ms; "
+                             << describe_frame_timing(frame);
     return result;
 }
 
