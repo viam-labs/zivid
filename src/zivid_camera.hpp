@@ -54,8 +54,28 @@ struct NoiseRemovalConfig {
     std::optional<double> threshold;
 };
 
+// Maps to Zivid::Settings::Processing::Filters::Reflection::Removal.
+// mode: "global" or "local".
+struct ReflectionRemovalConfig {
+    std::optional<bool> enabled;
+    std::optional<std::string> mode;
+};
+
+// Maps to Zivid::Settings::Processing::Filters::Experimental::ContrastDistortion.
+// `correction` (strength) and `removal` (threshold) each take 0.0–1.0.
+struct ContrastDistortionConfig {
+    struct Stage {
+        std::optional<bool> enabled;
+        std::optional<double> value;
+    };
+    std::optional<Stage> correction;
+    std::optional<Stage> removal;
+};
+
 struct ProcessingConfig {
     std::optional<NoiseRemovalConfig> noise_removal;
+    std::optional<ReflectionRemovalConfig> reflection_removal;
+    std::optional<ContrastDistortionConfig> contrast_distortion;
 };
 
 struct Config {
