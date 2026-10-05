@@ -580,6 +580,19 @@ Zivid::Settings make_settings(const Config& config) {
         }
     }
 
+    if (config.processing && config.processing->cluster_removal) {
+        const auto& cr = *config.processing->cluster_removal;
+        using ClusterRemoval = Zivid::Settings::Processing::Filters::Cluster::Removal;
+        if (cr.enabled)
+            settings.set(ClusterRemoval::Enabled{*cr.enabled});
+        if (cr.max_neighbor_distance)
+            settings.set(ClusterRemoval::MaxNeighborDistance{checked_value<ClusterRemoval::MaxNeighborDistance>(
+                *cr.max_neighbor_distance, "processing.cluster_removal.max_neighbor_distance")});
+        if (cr.min_area)
+            settings.set(
+                ClusterRemoval::MinArea{checked_value<ClusterRemoval::MinArea>(*cr.min_area, "processing.cluster_removal.min_area")});
+    }
+
     return settings;
 }
 
@@ -663,6 +676,11 @@ Config parse_config(const viam::sdk::ResourceConfig& cfg) {
                 cdc.removal = ContrastDistortionConfig::Stage{r->get<bool>("enabled"), r->get<double>("threshold")};
             }
             pc.contrast_distortion = cdc;
+        }
+
+        if (const auto cr = proc->object("cluster_removal")) {
+            pc.cluster_removal =
+                ClusterRemovalConfig{cr->get<bool>("enabled"), cr->get<double>("max_neighbor_distance"), cr->get<double>("min_area")};
         }
 
         result.processing = pc;

@@ -128,7 +128,7 @@ All coordinates are in **millimetres** relative to the **camera frame**.
 
 #### Processing filters
 
-Maps to `Zivid::Settings::Processing::Filters`. Noise removal, reflection removal and contrast distortion are exposed; any field left out keeps the camera's SDK default.
+Maps to `Zivid::Settings::Processing::Filters`. Noise removal, reflection removal, contrast distortion and cluster removal are exposed; any field left out keeps the camera's SDK default.
 
 **Noise removal** — discards low-confidence points. Raising the threshold removes more noisy/floating points at the cost of leaving holes (missing data); lowering it keeps more data. This is the same control as the "Noise → Removal → Threshold" slider in Zivid Studio. If omitted, the camera's SDK default is used (enabled, threshold ≈ 7).
 
@@ -174,6 +174,24 @@ Maps to `Zivid::Settings::Processing::Filters`. Noise removal, reflection remova
 | `correction.strength`  | float | No       | 0.0–1.0. Higher corrects more.                                 |
 | `removal.enabled`      | bool  | No       | Enable/disable removal of strongly corrected points.           |
 | `removal.threshold`    | float | No       | 0.0–1.0. Higher removes more points.                           |
+
+**Cluster removal** — removes small, disconnected groups of points (floating fragments and reflection ghosts). See Zivid's [Cluster Filter](https://support.zivid.com/en/latest/reference-articles/settings/processing-settings/cluster-filter.html) docs.
+
+```json
+"processing": {
+  "cluster_removal": {
+    "enabled": true,
+    "max_neighbor_distance": 8.5,
+    "min_area": 200
+  }
+}
+```
+
+| Name                    | Type  | Required | Description                                                                                                                  |
+| ----------------------- | ----- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`               | bool  | No       | Enable/disable cluster removal.                                                                                              |
+| `max_neighbor_distance` | float | No       | Normalized distance under which neighboring points belong to the same cluster. Lower splits more. Zivid recommends 2–10.     |
+| `min_area`              | float | No       | Clusters smaller than this area (mm²) are removed. Below 50 catches what noise removal misses; above 400 removes ghost planes. |
 
 #### Resolution and capture time
 

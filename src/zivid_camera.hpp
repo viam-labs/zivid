@@ -72,10 +72,19 @@ struct ContrastDistortionConfig {
     std::optional<Stage> removal;
 };
 
+// Maps to Zivid::Settings::Processing::Filters::Cluster::Removal.
+// max_neighbor_distance is a normalized distance; min_area is in mm².
+struct ClusterRemovalConfig {
+    std::optional<bool> enabled;
+    std::optional<double> max_neighbor_distance;
+    std::optional<double> min_area;
+};
+
 struct ProcessingConfig {
     std::optional<NoiseRemovalConfig> noise_removal;
     std::optional<ReflectionRemovalConfig> reflection_removal;
     std::optional<ContrastDistortionConfig> contrast_distortion;
+    std::optional<ClusterRemovalConfig> cluster_removal;
 };
 
 struct Config {
