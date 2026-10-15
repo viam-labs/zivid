@@ -1040,6 +1040,7 @@ viam::sdk::Camera::properties ZividCamera::compute_properties(const Zivid::Camer
 
     viam::sdk::Camera::properties props{};
     props.supports_pcd = true;
+    props.default_reference_frame = name();
 
     const auto& cm = base.cameraMatrix();
     props.intrinsic_parameters.width_px = static_cast<int>(color_res.width());
