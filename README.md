@@ -728,7 +728,7 @@ On arm64 the path carries an extra directory: `.../u24/arm64/zivid-tools_${REL}_
 - Zivid SDK 2.x installed (tested with 2.17.2)
 - Python 3 (for Conan venv)
 - CMake ≥ 3.25
-- GCC with C++17 support
+- GCC with C++20 support
 
 ### Steps
 

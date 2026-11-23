@@ -4,7 +4,7 @@ CMAKE_BUILD_DIR := $(CONAN_OUTPUT)/build/Release
 BIN_DIR := bin
 BINARY := viam-camera-zivid
 
-export CONAN_FLAGS := -s:a build_type=Release -s:a compiler.cppstd=17
+export CONAN_FLAGS := -s:a build_type=Release -s:a compiler.cppstd=20
 
 .PHONY: setup build conan-build conan-install-test conan-build-test test module.tar.gz clean check-sdk lint
 
